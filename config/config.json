@@ -1,0 +1,83 @@
+{
+  "schema_version": 1,
+  "server": {
+    "host": "0.0.0.0",
+    "port": 8080
+  },
+  "environment": {
+    "mode": "auto",
+    "hardware": "auto",
+    "media_backend": "auto"
+  },
+  "auth": {
+    "mode": "disabled",
+    "exempt_paths": []
+  },
+  "streaming": {
+    "rtsp_port": 8554,
+    "control_port": 9997,
+    "advertise_host": "",
+    "transport": "tcp",
+    "default_codec": "h264",
+    "manage_media_server": true,
+    "media_server_binary": "",
+    "media_server_version": "v1.21.2",
+    "playback_authentication": "disabled"
+  },
+  "health": {
+    "enabled": false,
+    "interval_seconds": 10,
+    "probe_timeout_seconds": 2
+  },
+  "limits": {
+    "max_mosaic_pixels": 2073600,
+    "max_mosaic_fps": 30,
+    "max_mosaic_bitrate_kbps": 8000,
+    "max_camera_streams": 6,
+    "max_transcode_streams": 2,
+    "mosaic_restart_attempts": 5,
+    "mosaic_restart_backoff_seconds": 2,
+    "subprocess_stop_timeout_seconds": 5
+  },
+  "logging": {
+    "level": "INFO",
+    "directory": "data/logs"
+  },
+  "storage": {
+    "secrets_file": "config/secrets.json",
+    "audit_db": "data/audit.db",
+    "camera_state": "data/camera_state.json",
+    "backup_directory": "data/backups"
+  },
+  "mavlink": {
+    "enabled": true,
+    "bind_host": "0.0.0.0",
+    "bind_port": 14550,
+    "system_id": 1,
+    "companion_component_id": 191,
+    "rcwm_component_id": 171,
+    "autopilot_component_id": 1,
+    "gcs_component_id": 190,
+    "allowed_gcs_system_ids": [255, 254],
+    "heartbeat_interval_seconds": 1.0,
+    "peer_timeout_seconds": 10.0,
+    "flight_controller": {
+      "transport": "none",
+      "serial_port": "",
+      "baud": 115200,
+      "udp_remote_host": "",
+      "udp_remote_port": 14550,
+      "udp_bind_host": "0.0.0.0",
+      "udp_bind_port": 14551
+    }
+  },
+  "rcwm": {
+    "enabled": true,
+    "transport": "simulation",
+    "serial_port": "",
+    "baud": 115200,
+    "allow_hardware_motion": false,
+    "owner_timeout_seconds": 1.5,
+    "state_file": "data/rcwm_state.json"
+  }
+}

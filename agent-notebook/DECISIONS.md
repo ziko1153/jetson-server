@@ -1,0 +1,21 @@
+# Decisions
+
+- Authentication is off. `auth.mode` can be set to `bearer` without changing routes. The token is read from `UGV_API_TOKEN` or `config/secrets.json`. Comparison uses `hmac.compare_digest`.
+- RTSP playback is open on the vehicle network. `streaming.playback_authentication: bearer` restricts readers to user `gcs` and the API token. The control API stays on localhost.
+- One shared mosaic is published at `/mosaic`. A revision, and an optional owner, reject silent overwrites.
+- Individual camera streams are MediaMTX pulls. They are not decoded. Transcoding is a separate start mode.
+- Health checks and capability probes do not run at startup. Probes happen only through the probe endpoint. Health checks run only when `health.enabled` is true.
+- The gateway does not scan the network and does not change Linux interfaces.
+- NVIDIA mosaic elements are used only after `gst-inspect-1.0` finds `nvv4l2decoder`, `nvvidconv`, and `nvv4l2h264enc`. Otherwise FFmpeg `libx264` is used.
+- MediaMTX is pinned to v1.21.2. The setup script downloads the binary that matches the machine.
+- Camera passwords stay out of `cameras.json` and out of API responses.
+- Python 3.10 is the minimum so a JetPack 6 system Python can run the same source.
+- The macOS simulation is the same gateway process. It selects `config/cameras.simulation.json`, `config/mosaic.simulation.json`, and `config/config.simulation.json` through environment variables for that process only. `scripts/start.sh` does not set those variables, and `config/config.json` keeps the flight-controller transport at `none`.
+- MAVLink stays on UDP. It is not an HTTP route and it does not use the camera bearer token.
+- One UDP socket binds `0.0.0.0:14550`. The process does not choose between GR03, mesh, and VPN, and it does not replace the direct Matek serial link.
+- Ground stations 255 and 254, component 190, are an allowlist. They are not authentication. MAVLink signing is not added, because the ground station does not sign.
+- RCWM replies are TUNNEL payload type 31000 from system 1 component 171, matching the Kotlin decoder. The Jetson heartbeat is a separate component 191 frame.
+- The ESP32 serial protocol is versioned and separate from the MAVLink body. GPIO stays in the firmware.
+- Motor limits are never invented. Motion toward hardware stays off until `rcwm.allow_hardware_motion` is set and the firmware pin map is confirmed.
+- Position values are step estimates. A new ESP32 boot id clears the reference and does not replay motion.
+- Host metrics that cannot be read are null. macOS does not report NVIDIA temperature or GPU load.

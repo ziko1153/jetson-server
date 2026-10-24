@@ -1,0 +1,28 @@
+{
+  "schema_version": 1,
+  "bind_host": "0.0.0.0",
+  "bind_interface": "",
+  "advertise_host": "",
+  "api_port": 8080,
+  "rtsp_port": 8554,
+  "control_port": 9997,
+  "publisher_rtsp_port": 8555,
+  "publisher_control_port": 9998,
+  "width": 640,
+  "height": 360,
+  "fps": 10,
+  "gateway_config": "config/config.simulation.json",
+  "sitl": {
+    "enabled": true,
+    "directory": "../sitl",
+    "flight_controller_port": 14551
+  },
+  "cameras": [
+    {"id": "CAM-001", "input": "pattern", "pattern": "testsrc", "hue_speed": 0},
+    {"id": "CAM-002", "input": "pattern", "pattern": "testsrc2", "hue_speed": 0},
+    {"id": "CAM-003", "input": "pattern", "pattern": "smptebars", "hue_speed": 40},
+    {"id": "CAM-004", "input": "pattern", "pattern": "mandelbrot", "hue_speed": 0},
+    {"id": "CAM-005", "input": "pattern", "pattern": "rgbtestsrc", "hue_speed": 25},
+    {"id": "CAM-006", "input": "pattern", "pattern": "yuvtestsrc", "hue_speed": 15}
+  ]
+}

@@ -1,0 +1,21 @@
+{
+  "schema_version": 1,
+  "revision": 14,
+  "owner": "gcs-255",
+  "enabled": true,
+  "layout": "three_focus",
+  "output": {
+    "width": 960,
+    "height": 540,
+    "fps": 25,
+    "bitrate_kbps": 1500,
+    "codec": "h264",
+    "stream_name": "mosaic"
+  },
+  "camera_ids": [
+    "CAM-001",
+    "CAM-002",
+    "CAM-003"
+  ],
+  "tiles": null
+}

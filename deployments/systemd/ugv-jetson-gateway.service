@@ -1,0 +1,16 @@
+[Unit]
+Description=UGV Jetson camera gateway
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=__ROOT__
+Environment=UGV_ROOT=__ROOT__
+ExecStart=__ROOT__/.venv/bin/python -m uvicorn app.main:app --host 0.0.0.0 --port 8080
+Restart=on-failure
+RestartSec=3
+# The service does not configure network interfaces.
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,23 @@
+{
+  "schema_version": 1,
+  "profiles": {
+    "low": {
+      "width": 960,
+      "height": 540,
+      "fps": 10,
+      "bitrate_kbps": 500
+    },
+    "medium": {
+      "width": 1280,
+      "height": 720,
+      "fps": 15,
+      "bitrate_kbps": 1500
+    },
+    "high": {
+      "width": 1920,
+      "height": 1080,
+      "fps": 20,
+      "bitrate_kbps": 3500
+    }
+  }
+}

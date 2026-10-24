@@ -1,0 +1,125 @@
+{
+  "schema_version": 1,
+  "cameras": [
+    {
+      "id": "CAM-001",
+      "name": "Front Camera",
+      "enabled": true,
+      "manufacturer": null,
+      "model": null,
+      "connection": {
+        "host": "192.168.144.101",
+        "port": 554,
+        "protocol": "rtsp",
+        "path": "/",
+        "onvif_port": 80,
+        "onvif_path": "/onvif/device_service"
+      },
+      "configuration": {
+        "driver": "auto",
+        "profile": "medium"
+      },
+      "credentials_ref": "CAM-001"
+    },
+    {
+      "id": "CAM-002",
+      "name": "Rear Camera",
+      "enabled": true,
+      "manufacturer": null,
+      "model": null,
+      "connection": {
+        "host": "192.168.144.102",
+        "port": 554,
+        "protocol": "rtsp",
+        "path": "/",
+        "onvif_port": 80,
+        "onvif_path": "/onvif/device_service"
+      },
+      "configuration": {
+        "driver": "auto",
+        "profile": "medium"
+      },
+      "credentials_ref": "CAM-002"
+    },
+    {
+      "id": "CAM-003",
+      "name": "Left Camera",
+      "enabled": true,
+      "manufacturer": null,
+      "model": null,
+      "connection": {
+        "host": "192.168.144.103",
+        "port": 554,
+        "protocol": "rtsp",
+        "path": "/",
+        "onvif_port": 80,
+        "onvif_path": "/onvif/device_service"
+      },
+      "configuration": {
+        "driver": "auto",
+        "profile": "medium"
+      },
+      "credentials_ref": "CAM-003"
+    },
+    {
+      "id": "CAM-004",
+      "name": "Right Camera",
+      "enabled": true,
+      "manufacturer": null,
+      "model": null,
+      "connection": {
+        "host": "192.168.144.104",
+        "port": 554,
+        "protocol": "rtsp",
+        "path": "/",
+        "onvif_port": 80,
+        "onvif_path": "/onvif/device_service"
+      },
+      "configuration": {
+        "driver": "auto",
+        "profile": "medium"
+      },
+      "credentials_ref": "CAM-004"
+    },
+    {
+      "id": "CAM-005",
+      "name": "Top Camera",
+      "enabled": true,
+      "manufacturer": null,
+      "model": null,
+      "connection": {
+        "host": "192.168.144.105",
+        "port": 554,
+        "protocol": "rtsp",
+        "path": "/",
+        "onvif_port": 80,
+        "onvif_path": "/onvif/device_service"
+      },
+      "configuration": {
+        "driver": "auto",
+        "profile": "medium"
+      },
+      "credentials_ref": "CAM-005"
+    },
+    {
+      "id": "CAM-006",
+      "name": "Auxiliary Camera",
+      "enabled": true,
+      "manufacturer": null,
+      "model": null,
+      "connection": {
+        "host": "192.168.144.106",
+        "port": 554,
+        "protocol": "rtsp",
+        "path": "/",
+        "onvif_port": 80,
+        "onvif_path": "/onvif/device_service"
+      },
+      "configuration": {
+        "driver": "auto",
+        "profile": "medium"
+      },
+      "credentials_ref": "CAM-006"
+    }
+  ]
+}

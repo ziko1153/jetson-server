@@ -1,0 +1,23 @@
+{
+  "schema_version": 1,
+  "revision": 1,
+  "owner": null,
+  "enabled": true,
+  "layout": "grid_3x2",
+  "output": {
+    "width": 1920,
+    "height": 1080,
+    "fps": 15,
+    "bitrate_kbps": 3000,
+    "codec": "h264",
+    "stream_name": "mosaic"
+  },
+  "camera_ids": [
+    "CAM-001",
+    "CAM-002",
+    "CAM-003",
+    "CAM-004",
+    "CAM-005",
+    "CAM-006"
+  ]
+}
