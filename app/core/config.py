@@ -263,7 +263,7 @@ def load_settings(root: Path | None = None) -> Settings:
 
 
 def _require_profiles(profiles: ProfileFile) -> None:
-    missing = {"low", "medium", "high"} - set(profiles.profiles)
+    missing = {"low", "medium", "high", "custom"} - set(profiles.profiles)
     if missing:
         raise ConfigurationError(f"profiles.json is missing {sorted(missing)}")
     if profiles.schema_version != 1:

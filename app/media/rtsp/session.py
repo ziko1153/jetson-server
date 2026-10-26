@@ -10,6 +10,7 @@ class StreamSession:
     camera_id: str
     phase: str = "idle"
     mode: str = "none"
+    stream: str = "main"
     error: str | None = None
     reconnect_count: int = 0
     started_monotonic: float | None = None

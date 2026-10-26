@@ -10,17 +10,6 @@ from app.schemas.stream import StreamStartRequest, StreamStopRequest
 router = APIRouter()
 
 
-@router.get("/streams")
-def list_streams(host: str = Depends(client_host), ctx=Depends(context)) -> dict:
-    items = [item.model_dump(mode="json") for item in ctx.streams.list_streams(host)]
-    return {"items": items, "count": len(items)}
-
-
-@router.get("/streams/{camera_id}")
-def get_stream(camera_id: str, host: str = Depends(client_host), ctx=Depends(context)) -> dict:
-    return ctx.streams.view(camera_id, host).model_dump(mode="json")
-
-
 @router.post("/streams/{camera_id}/start")
 def start_stream(
     camera_id: str,
@@ -29,7 +18,8 @@ def start_stream(
     ctx=Depends(context),
 ) -> dict:
     mode = body.mode if body else "passthrough"
-    return ctx.streams.start(camera_id, mode, host).model_dump(mode="json")
+    stream = body.stream if body else "main"
+    return ctx.streams.start(camera_id, mode, host, stream).model_dump(mode="json")
 
 
 @router.post("/streams/{camera_id}/stop")

@@ -11,7 +11,7 @@ CAMERA_ID = re.compile(r"^CAM-\d{3}$")
 HOST = re.compile(r"^[A-Za-z0-9][A-Za-z0-9.\-]{0,252}$")
 PATH = re.compile(r"^/[A-Za-z0-9._~!$&'()*+,;=:@%/-]*$")
 DriverName = Literal["auto", "onvif", "vendor", "readonly_rtsp"]
-ProfileName = Literal["low", "medium", "high"]
+ProfileName = Literal["low", "medium", "high", "custom"]
 ScalingMode = Literal["fit", "fill", "stretch"]
 
 
@@ -26,6 +26,7 @@ class ConnectionSettings(BaseModel):
     port: int = Field(default=554, ge=1, le=65535)
     protocol: Literal["rtsp", "rtsps"] = "rtsp"
     path: str = "/"
+    sub_path: str | None = None
     onvif_port: int = Field(default=80, ge=1, le=65535)
     onvif_path: str = "/onvif/device_service"
 
@@ -41,6 +42,15 @@ class ConnectionSettings(BaseModel):
     def path_ok(cls, value: str) -> str:
         if not PATH.fullmatch(value) or ".." in value:
             raise ValueError("path must start with / and cannot contain '..'")
+        return value
+
+    @field_validator("sub_path")
+    @classmethod
+    def sub_path_ok(cls, value: str | None) -> str | None:
+        if value is None or value == "":
+            return None
+        if not PATH.fullmatch(value) or ".." in value:
+            raise ValueError("sub_path must start with / and cannot contain '..'")
         return value
 
 
@@ -98,6 +108,7 @@ class CameraPatch(BaseModel):
     port: int | None = Field(default=None, ge=1, le=65535)
     protocol: Literal["rtsp", "rtsps"] | None = None
     path: str | None = None
+    sub_path: str | None = None
     onvif_port: int | None = Field(default=None, ge=1, le=65535)
     onvif_path: str | None = None
     driver: DriverName | None = None

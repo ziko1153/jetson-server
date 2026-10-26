@@ -163,7 +163,7 @@ class CameraConfigurationService:
             codec=update.codec,
         )
         profile = camera.configuration.profile
-        if update.stream_profile in {"low", "medium", "high"}:
+        if update.stream_profile in {"low", "medium", "high", "custom"}:
             profile = update.stream_profile
         configuration = camera.configuration.model_copy(update={"profile": profile, "gateway_overrides": overrides})
         self._registry.replace(camera.model_copy(update={"configuration": configuration}))

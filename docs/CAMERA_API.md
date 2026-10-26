@@ -1,6 +1,6 @@
 # Camera API
 
-There are **20 camera routes** under `/api/v1`, plus two system routes that reread or report the camera service. MAVLink and the water mount are not on these routes.
+There are **15 camera routes** under `/api/v1`, plus two system routes that reread or report the camera service. MAVLink and the water mount are not on these routes.
 
 Base URL: `http://<host>:8080`
 
@@ -34,16 +34,13 @@ While `scripts/start-simulation.sh` is running, those same URLs serve the virtua
 | Method | Path | What it does |
 | --- | --- | --- |
 | GET | `/api/v1/cameras` | List the registry |
-| GET | `/api/v1/cameras/{camera_id}` | One camera |
 | PATCH | `/api/v1/cameras/{camera_id}` | Change name, address, driver, or profile |
 | GET | `/api/v1/cameras/{camera_id}/status` | Reachability and stream phase |
 | POST | `/api/v1/cameras/{camera_id}/probe` | Contact that camera and store the report |
 | GET | `/api/v1/cameras/{camera_id}/capabilities` | Last stored report, no camera contact |
 | GET | `/api/v1/cameras/{camera_id}/settings` | Physical settings and gateway profile |
 | PUT | `/api/v1/cameras/{camera_id}/settings` | Change the camera encoder, or store gateway overrides |
-| GET | `/api/v1/streams` | Phase and URLs for every camera |
-| GET | `/api/v1/streams/{camera_id}` | One stream |
-| POST | `/api/v1/streams/{camera_id}/start` | Passthrough or transcode |
+| POST | `/api/v1/streams/{camera_id}/start` | Passthrough (forward) or transcode (process) |
 | POST | `/api/v1/streams/{camera_id}/stop` | Return the path to on-demand |
 | GET | `/api/v1/streams/{camera_id}/metrics` | Configured values and the few measured ones |
 | GET | `/api/v1/mosaic/layouts` | Layout names and camera counts |
@@ -51,7 +48,6 @@ While `scripts/start-simulation.sh` is running, those same URLs serve the virtua
 | PUT | `/api/v1/mosaic` | Replace the shared mosaic |
 | POST | `/api/v1/mosaic/start` | Publish it |
 | POST | `/api/v1/mosaic/stop` | Stop the publisher |
-| GET | `/api/v1/mosaic/status` | Process state |
 | GET | `/api/v1/audit/camera-configurations` | History of settings changes |
 
 Related:
@@ -116,9 +112,12 @@ Profiles in `config/profiles.json`:
 
 | Profile | Size | fps | Bitrate |
 | --- | --- | --- | --- |
-| low | 960x540 | 10 | 500 kbps |
-| medium | 1280x720 | 15 | 1500 kbps |
-| high | 1920x1080 | 20 | 3500 kbps |
+| low | 960x540 | 25 | 500 kbps |
+| medium | 1280x720 | 25 | 1500 kbps |
+| high | 1920x1080 | 30 | 3500 kbps |
+| custom | 1280x720 | 25 | 1500 kbps (caller overrides width, height, fps, bitrate) |
+
+`profile` is `low`, `medium`, `high`, or `custom`. The `custom` entry is a fallback used only when no gateway overrides are stored. With `custom`, the gateway transcodes at the stored `gateway_overrides` (width, height, fps, bitrate_kbps). The minimum fps is 25 because the handset RTSP reader cannot sustain lower frame rates.
 
 Both successful and rejected settings changes are listed by `GET /api/v1/audit/camera-configurations`.
 
@@ -163,12 +162,6 @@ Request: none.
 }
 ```
 
-### `GET /api/v1/cameras/{camera_id}`
-
-Request: none. Response: one object with the same fields as an item above.
-
-Errors: `404 not_found`.
-
 ### `PATCH /api/v1/cameras/{camera_id}`
 
 Every field is optional. Omitted fields stay as they are.
@@ -190,7 +183,7 @@ Every field is optional. Omitted fields stay as they are.
 }
 ```
 
-`protocol` is `rtsp` or `rtsps`. `driver` is `auto`, `onvif`, `vendor`, or `readonly_rtsp`. `profile` is `low`, `medium`, or `high`. `path` must start with `/` and must not contain `..`.
+`protocol` is `rtsp` or `rtsps`. `driver` is `auto`, `onvif`, `vendor`, or `readonly_rtsp`. `profile` is `low`, `medium`, `high`, or `custom`. `path` must start with `/` and must not contain `..`.
 
 Response: the updated camera object.
 
@@ -319,41 +312,14 @@ Errors: `404 not_found`, `422 validation_failed`, `422 physical_configuration_un
 
 ## Streams
 
-### `GET /api/v1/streams`
-
-Request: none.
-
-```json
-{
-  "items": [
-    {
-      "camera_id": "CAM-001",
-      "name": "Front",
-      "phase": "idle",
-      "mode": "none",
-      "gateway_stream_url": "rtsp://127.0.0.1:8554/camera/CAM-001",
-      "direct_stream_url": "rtsp://192.168.144.101:554/",
-      "readers": 0,
-      "online": false,
-      "error": null
-    }
-  ],
-  "count": 6
-}
-```
-
-`phase` is `idle` or `active`. `mode` is `none`, `passthrough`, or `transcode`. `readers` and `online` are null when MediaMTX has no path info.
-
-### `GET /api/v1/streams/{camera_id}`
-
-Request: none. Response: one stream object.
-
 ### `POST /api/v1/streams/{camera_id}/start`
 
-Body is optional. The default mode is passthrough.
+Body is optional. The default mode is passthrough (forward). Use `transcode` to process (decode + re-encode at the stored gateway profile).
+
+`stream` selects which camera RTSP path Jetson pulls: `main` (default) uses `connection.path`, `sub` uses `connection.sub_path` when set (falls back to `main`). Only meaningful for passthrough; transcode always uses the main path.
 
 ```json
-{"mode": "passthrough"}
+{"mode": "passthrough", "stream": "main"}
 ```
 
 ```json
@@ -473,7 +439,7 @@ Request: none.
 
 `scaling` is `fit`, `fill`, or `stretch`. Tile `x`, `y`, `width`, and `height` are even. `output.codec` is `h264`. `stream_name` is `mosaic`.
 
-The simulation mosaic file uses 960x540 at 10 fps. Production `config/mosaic.json` is the 1920x1080 record.
+The simulation mosaic file uses 960x540 at 25 fps. Production `config/mosaic.json` is the 1920x1080 record.
 
 ### `PUT /api/v1/mosaic`
 
@@ -513,27 +479,6 @@ Errors: `409 mosaic_disabled`, `503 media_server_unavailable`.
 ### `POST /api/v1/mosaic/stop`
 
 Request: none. Response: the mosaic object, with `running` false.
-
-### `GET /api/v1/mosaic/status`
-
-Request: none.
-
-```json
-{
-  "running": true,
-  "reconnect_required": false,
-  "revision": 2,
-  "owner": "gcs-1",
-  "stream_url": "rtsp://127.0.0.1:8554/mosaic",
-  "pid": 12345,
-  "restarts": 0,
-  "error": null,
-  "backend": "ffmpeg",
-  "acceleration": "software"
-}
-```
-
-`acceleration` is `software` or `nvidia`. `nvidia` is used only when the Jetson encoder plugins are present.
 
 ## Audit
 

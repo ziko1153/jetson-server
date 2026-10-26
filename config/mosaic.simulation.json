@@ -1,9 +1,9 @@
 {
   "schema_version": 1,
-  "revision": 14,
+  "revision": 15,
   "owner": "gcs-255",
   "enabled": true,
-  "layout": "three_focus",
+  "layout": "grid_3x2",
   "output": {
     "width": 960,
     "height": 540,
@@ -15,7 +15,10 @@
   "camera_ids": [
     "CAM-001",
     "CAM-002",
-    "CAM-003"
+    "CAM-003",
+    "CAM-004",
+    "CAM-005",
+    "CAM-006"
   ],
   "tiles": null
 }

@@ -59,14 +59,14 @@ class StreamManager:
             error=session.error,
         )
 
-    def start(self, camera_id: str, mode: str, public_host: str) -> StreamView:
+    def start(self, camera_id: str, mode: str, public_host: str, stream: str = "main") -> StreamView:
         camera = self._registry.get(camera_id)
         if not camera.enabled:
             raise ConflictError(f"Camera {camera.id} is disabled.", code="camera_disabled")
         if not self._media.running:
             raise UnavailableError("The RTSP server is not running.", code="media_server_unavailable")
         credentials = self._secrets.camera(camera.credentials_ref or camera.id)
-        source = source_rtsp_url(camera, credentials.username, credentials.password)
+        source = source_rtsp_url(camera, credentials.username, credentials.password, stream)
         with self._lock:
             if mode == "transcode":
                 self._start_transcode(camera.id, source)
@@ -76,6 +76,7 @@ class StreamManager:
             session = self._session(camera.id)
             session.phase = "active"
             session.mode = mode
+            session.stream = stream
             session.error = None
             session.started_monotonic = time.monotonic()
         return self.view(camera.id, public_host)
@@ -91,14 +92,15 @@ class StreamManager:
                 details={"readers": readers},
             )
         credentials = self._secrets.camera(camera.credentials_ref or camera.id)
-        source = source_rtsp_url(camera, credentials.username, credentials.password)
+        session = self._session(camera.id)
+        source = source_rtsp_url(camera, credentials.username, credentials.password, session.stream)
         with self._lock:
             self._stop_transcode_locked(camera.id)
             if self._media.running:
                 self._media.upsert(camera_path(camera.id), passthrough_conf(source, on_demand=True))
-            session = self._session(camera.id)
             session.phase = "idle"
             session.mode = "none"
+            session.stream = "main"
             session.started_monotonic = None
         return self.view(camera.id, public_host)
 
@@ -153,7 +155,7 @@ class StreamManager:
         if session.mode == "transcode":
             return
         credentials = self._secrets.camera(camera.credentials_ref or camera.id)
-        source = source_rtsp_url(camera, credentials.username, credentials.password)
+        source = source_rtsp_url(camera, credentials.username, credentials.password, session.stream)
         on_demand = not (session.phase == "active" and session.mode == "passthrough")
         self._media.upsert(path, passthrough_conf(source, on_demand=on_demand))
 

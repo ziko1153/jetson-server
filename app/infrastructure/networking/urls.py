@@ -11,13 +11,16 @@ def direct_rtsp_url(connection: ConnectionSettings) -> str:
     return f"{connection.protocol}://{connection.host}:{connection.port}{connection.path}"
 
 
-def source_rtsp_url(camera: CameraRecord, username: str, password: str) -> str:
+def source_rtsp_url(camera: CameraRecord, username: str, password: str, stream: str = "main") -> str:
     connection = camera.connection
+    path = connection.path
+    if stream == "sub" and connection.sub_path:
+        path = connection.sub_path
     if not username:
-        return direct_rtsp_url(connection)
+        return f"{connection.protocol}://{connection.host}:{connection.port}{path}"
     user = quote(username, safe="")
     secret = quote(password, safe="")
-    return f"{connection.protocol}://{user}:{secret}@{connection.host}:{connection.port}{connection.path}"
+    return f"{connection.protocol}://{user}:{secret}@{connection.host}:{connection.port}{path}"
 
 
 def public_rtsp_url(host: str, port: int, path: str) -> str:

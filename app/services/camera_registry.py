@@ -94,7 +94,7 @@ def _apply_patch(camera: CameraRecord, patch: CameraPatch) -> CameraRecord:
         value = getattr(patch, field)
         if value is not None:
             data[field] = value
-    for field in ("host", "port", "protocol", "path", "onvif_port", "onvif_path"):
+    for field in ("host", "port", "protocol", "path", "sub_path", "onvif_port", "onvif_path"):
         value = getattr(patch, field)
         if value is not None:
             connection[field] = value

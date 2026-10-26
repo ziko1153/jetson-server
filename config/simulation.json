@@ -8,9 +8,9 @@
   "control_port": 9997,
   "publisher_rtsp_port": 8555,
   "publisher_control_port": 9998,
-  "width": 640,
-  "height": 360,
-  "fps": 10,
+  "width": 960,
+  "height": 540,
+  "fps": 25,
   "gateway_config": "config/config.simulation.json",
   "sitl": {
     "enabled": true,

@@ -65,5 +65,5 @@ def test_reconnect_count_and_bitrate_need_real_samples(gateway_root) -> None:
     media.info["inboundBytes"] = 1000 + 125_000
     second = ctx.streams.metrics("CAM-001")
     assert second.measured_bitrate_kbps is not None
-    assert second.configured_fps == 15
+    assert second.configured_fps == 25
     assert second.measured_fps is None

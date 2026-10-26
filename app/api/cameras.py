@@ -16,11 +16,6 @@ def list_cameras(host: str = Depends(client_host), ctx=Depends(context)) -> dict
     return {"items": items, "count": len(items)}
 
 
-@router.get("/cameras/{camera_id}")
-def get_camera(camera_id: str, host: str = Depends(client_host), ctx=Depends(context)) -> dict:
-    return ctx.cameras.view(camera_id, host).model_dump(mode="json")
-
-
 @router.patch("/cameras/{camera_id}")
 def patch_camera(camera_id: str, patch: CameraPatch, host: str = Depends(client_host), ctx=Depends(context)) -> dict:
     ctx.registry.update(camera_id, patch)

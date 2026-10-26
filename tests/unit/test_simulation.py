@@ -51,7 +51,7 @@ def test_pattern_command_can_label_and_shift_hue() -> None:
     assert "smptebars=size=640x360:rate=10,hue=h=t*40,format=yuv420p" in command
     assert "[0:v][1:v]overlay=16:16:eof_action=repeat" in command
     assert "/tmp/CAM-003.ppm" in command
-    assert "baseline" in command
+    assert "veryfast" in command
 
 
 def test_file_command_loops_a_local_video() -> None:

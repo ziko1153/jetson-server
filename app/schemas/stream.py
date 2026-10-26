@@ -9,6 +9,7 @@ from pydantic import BaseModel, Field
 
 class StreamStartRequest(BaseModel):
     mode: Literal["passthrough", "transcode"] = "passthrough"
+    stream: Literal["main", "sub"] = "main"
 
 
 class StreamStopRequest(BaseModel):

@@ -22,13 +22,12 @@ def test_rename_persists_across_restart(gateway_root, client) -> None:
     from app.core.config import load_settings
 
     with TestClient(create_app(load_settings(gateway_root))) as restarted:
-        camera = restarted.get("/api/v1/cameras/CAM-002")
-    assert camera.json()["name"] == "Rear Left"
+        cameras = restarted.get("/api/v1/cameras").json()["items"]
+        camera = next(c for c in cameras if c["id"] == "CAM-002")
+    assert camera["name"] == "Rear Left"
 
 
-def test_invalid_camera_and_connection_are_rejected(client) -> None:
-    missing = client.get("/api/v1/cameras/CAM-999")
-    assert missing.status_code == 404
+def test_invalid_camera_and_connection_is_rejected(client) -> None:
     invalid = client.patch("/api/v1/cameras/CAM-001", json={"host": "http://bad", "path": "/../secret"})
     assert invalid.status_code == 422
 
@@ -91,7 +90,7 @@ def test_stream_start_without_media_server_is_unavailable(client) -> None:
     metrics = client.get("/api/v1/streams/CAM-001/metrics")
     assert metrics.status_code == 200
     assert metrics.json()["measured_fps"] is None
-    assert metrics.json()["configured_fps"] == 15
+    assert metrics.json()["configured_fps"] == 25
     assert "not measurements" in " ".join(metrics.json()["measurement_notes"])
 
 

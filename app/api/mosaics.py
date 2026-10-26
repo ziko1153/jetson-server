@@ -34,8 +34,3 @@ def start_mosaic(host: str = Depends(client_host), ctx=Depends(context)) -> dict
 @router.post("/mosaic/stop")
 def stop_mosaic(host: str = Depends(client_host), ctx=Depends(context)) -> dict:
     return ctx.mosaic.stop(host).model_dump(mode="json")
-
-
-@router.get("/mosaic/status")
-def mosaic_status(host: str = Depends(client_host), ctx=Depends(context)) -> dict:
-    return ctx.mosaic.status(host).model_dump(mode="json")
