@@ -13,7 +13,6 @@ from dataclasses import dataclass
 class MotorConfig:
     enabled: bool = False
     reversed: bool = False
-    polarity: int = 0
     steps_per_revolution: int = 1600
     gear_ratio: float = 1.0
     max_speed_dps: float | None = None
@@ -23,15 +22,11 @@ class MotorConfig:
     max_angle: float | None = None
     home_angle: float | None = 0.0
     deadband_percent: int = 0
-    control_timeout_ms: int | None = None
-    step_pulse_us: int | None = None
-    dir_setup_us: int | None = None
 
     def to_dict(self) -> dict:
         return {
             "enabled": self.enabled,
             "reversed": self.reversed,
-            "polarity": self.polarity,
             "steps_per_revolution": self.steps_per_revolution,
             "gear_ratio": self.gear_ratio,
             "max_speed_dps": self.max_speed_dps,
@@ -41,9 +36,6 @@ class MotorConfig:
             "max_angle": self.max_angle,
             "home_angle": self.home_angle,
             "deadband_percent": self.deadband_percent,
-            "control_timeout_ms": self.control_timeout_ms,
-            "step_pulse_us": self.step_pulse_us,
-            "dir_setup_us": self.dir_setup_us,
         }
 
     @classmethod

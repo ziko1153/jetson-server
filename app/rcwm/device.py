@@ -251,14 +251,7 @@ class Esp32Device:
         return any(abs(axis.commanded_dps) > 1e-6 or abs(axis.current_dps) > 1e-3 for axis in self.axes.values())
 
     def _timeout(self) -> float:
-        configured = [
-            axis.config.control_timeout_ms
-            for axis in self.axes.values()
-            if axis.config.control_timeout_ms is not None
-        ]
-        if not configured:
-            return DEFAULT_LINK_TIMEOUT_S
-        return min(configured) / 1000.0
+        return DEFAULT_LINK_TIMEOUT_S
 
     def _integrate(self, axis: _Axis, dt: float) -> None:
         if not axis.referenced or axis.steps is None or axis.current_dps == 0:

@@ -49,6 +49,33 @@ void handle(const SerialFrame& frame) {
         writeFrame(encodeFrame(kPong, frame.sequence, {}));
         return;
     }
+    if (frame.type == kConfigGet && !frame.payload.empty()) {
+        const int axis = frame.payload[0];
+        if (axis < 1 || axis > 3) {
+            writeFrame(ack(frame.sequence, kConfigGet, kRejected));
+            return;
+        }
+        const std::vector<uint8_t> body = planner.configBody(axis);
+        std::vector<uint8_t> payload = {static_cast<uint8_t>(axis), kApplied};
+        payload.insert(payload.end(), body.begin(), body.end());
+        writeFrame(encodeFrame(kConfigReply, frame.sequence, payload));
+        return;
+    }
+    if (frame.type == kConfigSet && frame.payload.size() >= 1 + kConfigBody) {
+        const int axis = frame.payload[0];
+        std::vector<uint8_t> body(frame.payload.begin() + 1, frame.payload.begin() + 1 + kConfigBody);
+        if (!planner.applyConfigBody(axis, body)) {
+            writeFrame(ack(frame.sequence, kConfigSet, kRejected));
+            return;
+        }
+        if (!planner.saveConfig(axis)) {
+            // ESP32 could not persist the config. Tell the Jetson so it can error the GCS.
+            writeFrame(ack(frame.sequence, kConfigSet, kRejected));
+            return;
+        }
+        writeFrame(ack(frame.sequence, kConfigSet, kApplied));
+        return;
+    }
     if (frame.type == kSelect && !frame.payload.empty()) {
         writeFrame(ack(frame.sequence, kSelect, static_cast<uint8_t>(planner.select(frame.payload[0]))));
         return;
@@ -80,6 +107,10 @@ void setup() {
     bootId = micros();
     planner.restart();
     energized = false;
+    // Load saved config for each axis from Preferences (NVS). ESP32 is the single source of truth.
+    for (int axis = 1; axis <= 3; ++axis) {
+        planner.loadConfig(axis);
+    }
     // Drivers stay released. Pulse generation is compiled out until pins are confirmed.
 }
 

@@ -142,7 +142,7 @@ def encode_config(config: MotorConfig, preserved: bool = False) -> bytes:
     if preserved:
         flags |= CFG_PRESERVED
     raw[0] = flags
-    raw[1] = config.polarity & 0xFF
+    # byte[1] was polarity; reserved (0). Hardware enable polarity is set on the controller.
     _put_u16(raw, 2, config.steps_per_revolution)
     gear = int(round(config.gear_ratio * GEAR_SCALE))
     _put_u32(raw, 4, gear)
@@ -153,9 +153,8 @@ def encode_config(config: MotorConfig, preserved: bool = False) -> bytes:
     _put_i16(raw, 16, _angle16(config.max_angle))
     _put_i16(raw, 18, _angle16(config.home_angle))
     raw[20] = config.deadband_percent & 0xFF
-    _put_u16(raw, 21, U16_NONE if config.control_timeout_ms is None else config.control_timeout_ms)
-    _put_u16(raw, 23, 0 if config.step_pulse_us is None else config.step_pulse_us)
-    _put_u16(raw, 25, 0 if config.dir_setup_us is None else config.dir_setup_us)
+    # bytes 21..26 were control timeout, STEP pulse, DIR setup. Reserved (0).
+    # Hardware timing stays on the controller.
     return bytes(raw)
 
 
@@ -163,13 +162,9 @@ def decode_config(payload: bytes) -> tuple[MotorConfig, bool] | None:
     if len(payload) < CONFIG_BODY:
         return None
     flags = payload[0]
-    timeout = _u16(payload, 21)
-    pulse = _u16(payload, 23)
-    setup = _u16(payload, 25)
     config = MotorConfig(
         enabled=bool(flags & CFG_ENABLED),
         reversed=bool(flags & CFG_REVERSED),
-        polarity=payload[1],
         steps_per_revolution=_u16(payload, 2),
         gear_ratio=_u32(payload, 4) / GEAR_SCALE,
         max_speed_dps=_from_speed(_u16(payload, 8)),
@@ -179,9 +174,6 @@ def decode_config(payload: bytes) -> tuple[MotorConfig, bool] | None:
         max_angle=_from_angle(_i16(payload, 16)),
         home_angle=_from_angle(_i16(payload, 18)),
         deadband_percent=payload[20],
-        control_timeout_ms=None if timeout == U16_NONE else timeout,
-        step_pulse_us=None if pulse == 0 else pulse,
-        dir_setup_us=None if setup == 0 else setup,
     )
     return config, bool(flags & CFG_PRESERVED)
 

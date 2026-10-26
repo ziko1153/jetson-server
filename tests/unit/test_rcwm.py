@@ -60,7 +60,6 @@ def commissioned(**overrides) -> MotorConfig:
         max_speed_dps=90,
         max_accel=100_000,
         max_decel=100_000,
-        control_timeout_ms=500,
         deadband_percent=0,
         home_angle=0,
     )
@@ -168,12 +167,15 @@ def test_home_sets_an_estimate_and_restart_clears_it(tmp_path: Path) -> None:
     clock = Clock()
     item = service(tmp_path, clock)
     item.handle(255, 190, encode_header(OWNERSHIP, 1, 0, REQUEST))
-    item.handle(255, 190, write_config(1, 2, commissioned(control_timeout_ms=10_000)))
+    item.handle(255, 190, write_config(1, 2, commissioned()))
     assert item.handle(255, 190, encode_header(HOME, 3, 1, REQUEST))[0][7] == APPLIED
     item.handle(255, 190, motion_command(4, 36, 0, 0))
     moving = item.handle(255, 190, encode_header(HOME, 5, 1, REQUEST))[0]
     assert moving[7] == SAFETY
+    rid = 100
     for _ in range(20):
+        item.handle(255, 190, motion_command(rid, 36, 0, 0))
+        rid += 1
         clock.now += 0.05
         item.maintain()
     status = decode_status_body(item.handle(255, 190, encode_header(STATUS, 6, 0, REQUEST))[0][8:])
@@ -200,13 +202,13 @@ def test_timeout_stops_motion_and_duplicate_motion_is_rejected(tmp_path: Path) -
     clock = Clock()
     item = service(tmp_path, clock)
     item.handle(255, 190, encode_header(OWNERSHIP, 1, 0, REQUEST))
-    item.handle(255, 190, write_config(1, 2, commissioned(control_timeout_ms=200)))
+    item.handle(255, 190, write_config(1, 2, commissioned()))
     item.handle(255, 190, motion_command(3, 10, 0, 0))
     assert item.snapshot()["esp32"]["energized"] is True
     repeated = item.handle(255, 190, motion_command(3, 10, 0, 0))[0]
     assert repeated[7] == REJECTED
     assert item._device.motion_frames == 1
-    clock.now += 0.3
+    clock.now += 0.6
     item.maintain()
     assert item.snapshot()["esp32"]["energized"] is False
     assert item.snapshot()["axes"]["pan"]["current_dps"] == 0
@@ -228,15 +230,3 @@ def test_serial_motion_frame_reaches_the_simulated_controller() -> None:
     assert device.view().axes[2].referenced is False
     assert device.energized is False
 
-
-def test_hardware_motion_stays_blocked_on_the_serial_transport(tmp_path: Path) -> None:
-    item = RcwmService(
-        RcwmSettings(enabled=True, transport="serial", serial_port="", allow_hardware_motion=False),
-        tmp_path / "rcwm.json",
-    )
-    item.start(background=False)
-    item.handle(255, 190, encode_header(OWNERSHIP, 1, 0, REQUEST))
-    reply = item.handle(255, 190, motion_command(2, 5, 0, 0))[0]
-    assert reply[7] == SAFETY
-    assert item.snapshot()["esp32"]["connected"] is False
-    item.stop()

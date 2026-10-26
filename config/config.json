@@ -73,7 +73,7 @@
   },
   "rcwm": {
     "enabled": true,
-    "transport": "simulation",
+    "transport": "serial",
     "serial_port": "",
     "baud": 115200,
     "allow_hardware_motion": false,

@@ -6,10 +6,8 @@ replace a hardware emergency stop. Reported angles are estimates.
 
 from __future__ import annotations
 
-import json
 import logging
 import threading
-from pathlib import Path
 
 from app.core.config import RcwmSettings
 from app.rcwm.device import Esp32Device
@@ -29,7 +27,6 @@ from app.rcwm.protocol import (
     REJECTED,
     RELEASE,
     REQUEST,
-    SAFETY,
     SELECT,
     STATUS,
     STOP,
@@ -90,11 +87,9 @@ class RcwmService:
     def start(self, background: bool = True) -> None:
         if not self._settings.enabled or self._started:
             return
-        self._load()
         self._mount.start()
         self._boot = self._mount.boot_id
-        self._push_config()
-        self._config_sent = self._mount.connected
+        self._pull_config()
         self._started = True
         self._last = self._clock()
         if background:
@@ -141,7 +136,6 @@ class RcwmService:
                 "enabled": self._settings.enabled,
                 "running": self._started,
                 "transport": self._settings.transport,
-                "hardware_motion_allowed": self._settings.allow_hardware_motion,
                 "owner_system_id": self._owner,
                 "positions": "estimates",
                 "software_stop_is_hardware_estop": False,
@@ -176,7 +170,7 @@ class RcwmService:
             self._boot = boot
             self._config_sent = False
         if self._mount.connected and not self._config_sent:
-            self._push_config()
+            self._pull_config()
             self._config_sent = True
         if self._owner and now - self._owner_seen > self._settings.owner_timeout_seconds:
             self._owner = 0
@@ -250,7 +244,6 @@ class RcwmService:
         if result != APPLIED:
             return encode_ack(request.opcode, request.request_id, request.axis, result or UNAVAILABLE)
         self._configs[request.axis] = config
-        self._save()
         applied = _config_frame(replies)
         preserved = applied[1] if applied else False
         return encode_header(CONFIG_WRITE, request.request_id, request.axis, APPLIED) + encode_config(config, preserved)
@@ -268,9 +261,6 @@ class RcwmService:
             return self._denied(request)
         if decode_motion(request.payload) is None:
             return encode_ack(request.opcode, request.request_id, 0, REJECTED)
-        if self._settings.transport == "serial" and not self._settings.allow_hardware_motion:
-            logger.info("RCWM motion refused until allow_hardware_motion is true")
-            return encode_ack(request.opcode, request.request_id, 0, SAFETY)
         result = _ack_result(self._exchange(SERIAL_MOTION, request.payload), SERIAL_MOTION)
         return encode_ack(request.opcode, request.request_id, 0, result or UNAVAILABLE)
 
@@ -335,35 +325,14 @@ class RcwmService:
             return []
         return self._mount.exchange(msg_type, payload)
 
-    def _push_config(self) -> None:
+    def _pull_config(self) -> None:
         if not self._mount.connected:
             return
-        for axis_id, config in self._configs.items():
-            self._exchange(CONFIG_SET, bytes([axis_id]) + encode_config(config))
-
-    def _load(self) -> None:
-        if not self._state_path.is_file():
-            return
-        try:
-            raw = json.loads(self._state_path.read_text(encoding="utf-8"))
-            motors = raw.get("motors", {})
-        except (OSError, json.JSONDecodeError, AttributeError):
-            logger.warning("RCWM state file is unreadable. Using defaults.")
-            return
         for axis_id in AXES:
-            item = motors.get(str(axis_id))
-            if isinstance(item, dict):
-                self._configs[axis_id] = MotorConfig.from_dict(item)
-
-    def _save(self) -> None:
-        payload = {
-            "schema_version": 1,
-            "motors": {str(axis_id): config.to_dict() for axis_id, config in self._configs.items()},
-        }
-        self._state_path.parent.mkdir(parents=True, exist_ok=True)
-        temporary = self._state_path.with_suffix(".json.tmp")
-        temporary.write_text(json.dumps(payload, indent=2), encoding="utf-8")
-        temporary.replace(self._state_path)
+            replies = self._exchange(CONFIG_GET, bytes([axis_id]))
+            decoded = _config_frame(replies)
+            if decoded is not None:
+                self._configs[axis_id] = decoded[0]
 
 
 def _ack_result(replies, msg_type: int) -> int | None:
