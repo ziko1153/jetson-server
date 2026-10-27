@@ -55,6 +55,9 @@ class _Axis:
     residual: float = 0.0
     commanded_dps: float = 0.0
     current_dps: float = 0.0
+    # Saved position, like the firmware's NVS store.
+    saved_steps: int | None = None
+    saved_referenced: bool = False
 
 
 class Esp32Device:
@@ -75,9 +78,16 @@ class Esp32Device:
         self.energized = False
         self.fault_code = FAULT_NONE
         for axis in self.axes.values():
-            axis.referenced = False
-            axis.reference_invalid = True
-            axis.steps = None
+            # The controller keeps the last halted position in NVS, so a reboot
+            # restores the reference and the angle.
+            if axis.saved_referenced and axis.saved_steps is not None:
+                axis.steps = axis.saved_steps
+                axis.referenced = True
+                axis.reference_invalid = False
+            else:
+                axis.referenced = False
+                axis.reference_invalid = True
+                axis.steps = None
             axis.residual = 0.0
             axis.commanded_dps = 0.0
             axis.current_dps = 0.0
@@ -152,21 +162,15 @@ class Esp32Device:
         decoded = decode_config(frame.payload[1:])
         if axis is None or decoded is None:
             return [self._ack(frame, REJECTED, FAULT_NONE)]
-        config, preserved = decoded
+        config, _preserved = decoded
         issues = validate_motor(config)
         if issues:
             return [self._ack(frame, REJECTED, 5)]
-        changed = _kinematics_changed(axis.config, config)
         axis.config = config
-        if changed and not preserved:
-            axis.referenced = False
-            axis.reference_invalid = True
-            axis.steps = None
-            axis.residual = 0.0
         if not config.enabled:
             axis.commanded_dps = 0.0
             axis.current_dps = 0.0
-        payload = bytes([axis_id, APPLIED]) + encode_config(config, preserved=axis.referenced and not changed)
+        payload = bytes([axis_id, APPLIED]) + encode_config(config, preserved=axis.referenced)
         return [self._ack(frame, APPLIED, FAULT_NONE), Frame(CONFIG_REPLY, frame.sequence, payload)]
 
     def _select(self, frame: Frame) -> list[Frame]:
@@ -234,18 +238,32 @@ class Esp32Device:
             return [self._ack(frame, SAFETY, FAULT_NONE)]
         if axis.config.home_angle is None:
             return [self._ack(frame, REJECTED, FAULT_POSITION)]
-        axis.steps = _steps_for(axis.config.home_angle, axis.config)
+        axis.steps = 0
+        axis.config.home_angle = 0.0
         axis.residual = 0.0
         axis.referenced = True
         axis.reference_invalid = False
+        self._save_axis(axis)
         self.fault_code = FAULT_NONE
         return [self._ack(frame, APPLIED, FAULT_NONE), self._status(frame.sequence)]
+
+    def _save_axis(self, axis: _Axis) -> None:
+        # Mirrors the firmware: the last halted position is persisted so a
+        # reboot keeps the reference and the angle.
+        if axis.referenced and axis.steps is not None:
+            axis.saved_steps = axis.steps
+            axis.saved_referenced = True
+        else:
+            axis.saved_steps = None
+            axis.saved_referenced = False
 
     def _halt(self, immediate: bool) -> None:
         for axis in self.axes.values():
             axis.commanded_dps = 0.0
             if immediate:
                 axis.current_dps = 0.0
+            if axis.current_dps == 0.0:
+                self._save_axis(axis)
 
     def _moving(self) -> bool:
         return any(abs(axis.commanded_dps) > 1e-6 or abs(axis.current_dps) > 1e-3 for axis in self.axes.values())

@@ -74,10 +74,10 @@
   "rcwm": {
     "enabled": true,
     "transport": "serial",
-    "serial_port": "",
+    "serial_port": "/dev/cu.usbserial-0001",
     "baud": 115200,
-    "allow_hardware_motion": false,
-    "owner_timeout_seconds": 1.5,
+    "allow_hardware_motion": true,
+    "owner_timeout_seconds": 30,
     "state_file": "data/rcwm_state.json"
   }
 }

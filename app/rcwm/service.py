@@ -7,6 +7,7 @@ replace a hardware emergency stop. Reported angles are estimates.
 from __future__ import annotations
 
 import logging
+import math
 import threading
 
 from app.core.config import RcwmSettings
@@ -18,8 +19,10 @@ from app.rcwm.protocol import (
     AXES,
     CONFIG_READ,
     CONFIG_WRITE,
+    FAULT_CONTROLLER,
     FAULT_ESP32_SILENT,
     FAULT_OWNERSHIP,
+    FAULT_REFERENCE,
     HOME,
     MOTION,
     OWNERSHIP,
@@ -35,8 +38,17 @@ from app.rcwm.protocol import (
     FAULTS,
     AxisView,
     Request,
+    MOTION_MAX_AGE_MS,
+    REASON_BOTH,
+    REASON_CONFIG,
+    REASON_MOVING,
+    REASON_REFERENCE,
+    REASON_SPEED,
+    REASON_TILT,
+    SAFETY,
     decode_config,
     decode_motion,
+    decode_motion_stamp,
     encode_ack,
     encode_config,
     encode_header,
@@ -139,7 +151,7 @@ class RcwmService:
                 "owner_system_id": self._owner,
                 "positions": "estimates",
                 "software_stop_is_hardware_estop": False,
-                "reference_kept_across_restart": False,
+                "reference_kept_across_restart": True,
                 "esp32": {
                     "connected": connected,
                     "boot_id": None if view is None else view.boot_id,
@@ -218,6 +230,9 @@ class RcwmService:
             fault_code=fault,
             axes=view.axes if view.connected else {axis_id: AxisView() for axis_id in AXES},
         )
+        # The GCS stamps stick commands with this clock so a late packet can be dropped.
+        clock_ms = int(self._clock() * 1000) & 0xFFFFFFFF
+        body += clock_ms.to_bytes(4, "little")
         return encode_status(request.request_id, request.opcode, body)
 
     def _read_config(self, request: Request) -> bytes:
@@ -259,10 +274,26 @@ class RcwmService:
     def _motion(self, system_id: int, request: Request) -> bytes:
         if not self._owns(system_id):
             return self._denied(request)
-        if decode_motion(request.payload) is None:
+        rates = decode_motion(request.payload)
+        if rates is None:
             return encode_ack(request.opcode, request.request_id, 0, REJECTED)
-        result = _ack_result(self._exchange(SERIAL_MOTION, request.payload), SERIAL_MOTION)
-        return encode_ack(request.opcode, request.request_id, 0, result or UNAVAILABLE)
+        if self._settings.transport == "serial" and not self._settings.allow_hardware_motion:
+            # Stop is still forwarded. Only motion frames are held back.
+            return encode_ack(request.opcode, request.request_id, 0, SAFETY)
+        stamp = decode_motion_stamp(request.payload)
+        if stamp is not None and self._motion_is_stale(stamp):
+            # The hand has moved on. Do not start the motor from an old rate.
+            return encode_ack(request.opcode, request.request_id, 0, TIMEOUT)
+        pan = self._clamp_rate(1, rates[0])
+        tilt1 = self._clamp_rate(2, rates[1])
+        tilt2 = self._clamp_rate(3, rates[2])
+        result, fault = _ack_frame(self._exchange(SERIAL_MOTION, encode_motion(pan, tilt1, tilt2)), SERIAL_MOTION)
+        if result is None:
+            return encode_ack(request.opcode, request.request_id, 0, UNAVAILABLE)
+        if result == SAFETY:
+            reason = self._motion_reason(pan, tilt1, tilt2, fault)
+            return encode_ack(request.opcode, request.request_id, 0, SAFETY) + bytes([reason])
+        return encode_ack(request.opcode, request.request_id, 0, result)
 
     def _stop_motion(self, request: Request) -> bytes:
         result = _ack_result(self._exchange(SERIAL_STOP, b""), SERIAL_STOP)
@@ -273,15 +304,19 @@ class RcwmService:
             return self._denied(request)
         if request.axis not in AXES:
             return encode_ack(request.opcode, request.request_id, request.axis, REJECTED)
-        result = _ack_result(self._exchange(SET_HOME, bytes([request.axis])), SET_HOME)
-        return encode_ack(HOME, request.request_id, request.axis, result or UNAVAILABLE)
+        result, _fault = _ack_frame(self._exchange(SET_HOME, bytes([request.axis])), SET_HOME)
+        if result is None:
+            return encode_ack(HOME, request.request_id, request.axis, UNAVAILABLE)
+        if result == SAFETY:
+            return encode_ack(HOME, request.request_id, request.axis, SAFETY) + bytes([REASON_MOVING])
+        return encode_ack(HOME, request.request_id, request.axis, result)
 
     def _take_ownership(self, system_id: int, request: Request) -> bytes:
-        if self._owner in (0, system_id) or self._owner_expired():
-            self._owner = system_id
-            self._owner_seen = self._clock()
-            return encode_ack(OWNERSHIP, request.request_id, 0, APPLIED)
-        return encode_ack(OWNERSHIP, request.request_id, 0, REJECTED)
+        # Last writer wins. A new GCS request takes control; the previous
+        # owner loses it on the next status.
+        self._owner = system_id
+        self._owner_seen = self._clock()
+        return encode_ack(OWNERSHIP, request.request_id, 0, APPLIED)
 
     def _release(self, system_id: int, request: Request) -> bytes:
         if self._owner != system_id:
@@ -325,6 +360,49 @@ class RcwmService:
             return []
         return self._mount.exchange(msg_type, payload)
 
+    def _motion_is_stale(self, stamp_ms: int) -> bool:
+        now_ms = int(self._clock() * 1000) & 0xFFFFFFFF
+        age = (now_ms - (stamp_ms & 0xFFFFFFFF)) & 0xFFFFFFFF
+        # A stamp slightly ahead of us is clock error, not a packet from the future.
+        if age > 0x80000000:
+            return False
+        return age > MOTION_MAX_AGE_MS
+
+    def _clamp_rate(self, axis_id: int, rate: float) -> float:
+        # A full stick can land a hair over the stored maximum after rounding.
+        limit = self._configs[axis_id].max_speed_dps
+        if limit is None or limit <= 0 or abs(rate) <= limit:
+            return rate
+        if abs(rate) - limit <= 0.05:
+            return math.copysign(limit, rate)
+        return rate
+
+    def _motion_reason(self, pan: float, tilt1: float, tilt2: float, fault: int) -> int:
+        if fault == FAULT_REFERENCE:
+            return REASON_REFERENCE
+        if fault == FAULT_CONTROLLER:
+            return REASON_CONFIG
+        if tilt1 != 0 and tilt2 != 0:
+            return REASON_BOTH
+        view = self._mount.view()
+        if tilt1 != 0 and view.active_tilt != 2:
+            return REASON_TILT
+        if tilt2 != 0 and view.active_tilt != 3:
+            return REASON_TILT
+        for axis_id, rate in ((1, pan), (2, tilt1), (3, tilt2)):
+            if rate == 0:
+                continue
+            config = self._configs[axis_id]
+            limit = config.max_speed_dps
+            if not config.enabled or limit is None or config.max_accel is None or config.max_decel is None:
+                return REASON_CONFIG
+            if abs(rate) > limit + 0.05:
+                return REASON_SPEED
+            axis = view.axes.get(axis_id)
+            if axis is not None and axis.reference_invalid and (config.min_angle is not None or config.max_angle is not None):
+                return REASON_REFERENCE
+        return 0
+
     def _pull_config(self) -> None:
         if not self._mount.connected:
             return
@@ -336,15 +414,20 @@ class RcwmService:
 
 
 def _ack_result(replies, msg_type: int) -> int | None:
+    result, _fault = _ack_frame(replies, msg_type)
+    return result
+
+
+def _ack_frame(replies, msg_type: int) -> tuple[int | None, int]:
     if not replies:
-        return None
+        return None, 0
     for frame in replies:
         if frame.msg_type == ACK and len(frame.payload) >= 2 and frame.payload[0] == msg_type:
             fault = frame.payload[2] if len(frame.payload) > 2 else 0
             if fault == FAULT_OWNERSHIP:
-                return REJECTED
-            return frame.payload[1]
-    return TIMEOUT
+                return REJECTED, fault
+            return frame.payload[1], fault
+    return TIMEOUT, 0
 
 
 def _config_frame(replies) -> tuple[MotorConfig, bool] | None:

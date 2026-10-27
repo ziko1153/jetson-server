@@ -132,6 +132,25 @@ def decode_motion(payload: bytes) -> tuple[float, float, float] | None:
     return struct.unpack("<fff", payload[:12])
 
 
+def decode_motion_stamp(payload: bytes) -> int | None:
+    """Jetson-clock milliseconds written by the GCS. Absent on older senders."""
+    if len(payload) < 16:
+        return None
+    return int.from_bytes(payload[12:16], "little")
+
+
+# A stick sample older than this was sitting in the network. Drop it.
+MOTION_MAX_AGE_MS = 500
+
+# Why a motion or home command was refused. Carried after the ack header.
+REASON_SPEED = 1
+REASON_TILT = 2
+REASON_BOTH = 3
+REASON_CONFIG = 4
+REASON_REFERENCE = 5
+REASON_MOVING = 6
+
+
 def encode_config(config: MotorConfig, preserved: bool = False) -> bytes:
     raw = bytearray(CONFIG_BODY)
     flags = 0

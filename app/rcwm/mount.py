@@ -9,9 +9,13 @@ import time
 from app.rcwm.device import Esp32Device
 from app.rcwm.models import MountView
 from app.rcwm.protocol import AXES, FAULT_ESP32_SILENT, AxisView
-from app.rcwm.serial_protocol import HELLO, HELLO_ACK, STATUS, Frame, encode_frame, pop_frames
+from app.rcwm.serial_protocol import HELLO, HELLO_ACK, STATUS, STATUS_REQ, Frame, encode_frame, pop_frames
 
 logger = logging.getLogger("app.rcwm")
+
+# The ESP32 pushes STATUS continuously. The Jetson still asks occasionally as a
+# liveness check and for exchanges that need a reply.
+STATUS_POLL_SECONDS = 2.0
 
 
 class SimulatedMount:
@@ -65,7 +69,7 @@ class SerialMount:
         self._baud = baud
         self._serial = None
         self._buffer = bytearray()
-        self._lock = threading.Lock()
+        self._lock = threading.RLock()
         self._sequence = 1
         self.connected = False
         self.last_error = ""
@@ -74,6 +78,7 @@ class SerialMount:
         self._view = _empty_view()
         self._pending: list[Frame] = []
         self._last_open = 0.0
+        self._last_status = 0.0
 
     def start(self) -> None:
         self._open(send_hello=True)
@@ -89,6 +94,11 @@ class SerialMount:
         if self.connected:
             self._read()
             self._take_frames()
+            now = time.monotonic()
+            # Keep the mount view fresh so the GCS sees real controller state.
+            if now - self._last_status >= STATUS_POLL_SECONDS:
+                self._last_status = now
+                self.exchange(STATUS_REQ, b"")
             return
         now = time.monotonic()
         if now - self._last_open < 2:
@@ -97,30 +107,35 @@ class SerialMount:
         self._open(send_hello=True)
 
     def exchange(self, msg_type: int, payload: bytes = b"") -> list[Frame]:
-        if not self.connected:
-            return []
-        if msg_type == 9:
-            self.motion_frames += 1
-        sequence = self._sequence
-        self._sequence = (self._sequence + 1) & 0xFFFF
-        frame = encode_frame(msg_type, sequence, payload)
-        try:
-            with self._lock:
+        # One owner of the port at a time. The command path and the status
+        # poll used to read it together, and the replies were lost.
+        with self._lock:
+            if not self.connected or self._serial is None:
+                return []
+            if msg_type == 9:
+                self.motion_frames += 1
+            sequence = self._sequence
+            self._sequence = (self._sequence + 1) & 0xFFFF
+            frame = encode_frame(msg_type, sequence, payload)
+            try:
                 self._serial.write(frame)
-        except Exception as exc:
-            self.last_error = str(exc)
-            self._drop()
-            return []
-        deadline = time.monotonic() + 0.2
-        found: list[Frame] = []
-        while time.monotonic() < deadline:
-            self._read()
-            for parsed in self._take_frames():
-                found.append(parsed)
-                if _completes(msg_type, parsed):
-                    return found
-            time.sleep(0.01)
-        return found
+            except Exception as exc:
+                self.last_error = str(exc)
+                # A full buffer must not hang the link, and one slow write
+                # must not drop the port. A real IO error still closes it.
+                if exc.__class__.__name__ != "SerialTimeoutException":
+                    self._close_locked()
+                return []
+            deadline = time.monotonic() + 0.2
+            found: list[Frame] = []
+            while time.monotonic() < deadline:
+                self._read()
+                for parsed in self._take_frames():
+                    found.append(parsed)
+                    if _completes(msg_type, parsed):
+                        return found
+                time.sleep(0.005)
+            return found
 
     def view(self) -> MountView:
         current = self._view
@@ -140,7 +155,7 @@ class SerialMount:
             self.connected = False
             return
         try:
-            port = serial.Serial(self._port, self._baud, timeout=0.05)
+            port = serial.Serial(self._port, self._baud, timeout=0.05, write_timeout=0.05)
         except Exception as exc:
             self.last_error = str(exc)
             self.connected = False
@@ -153,21 +168,21 @@ class SerialMount:
             self.exchange(HELLO, b"")
 
     def _read(self) -> None:
-        port = self._serial
-        if port is None:
-            return
-        try:
-            waiting = port.in_waiting
-            if not waiting:
-                return
-            chunk = port.read(waiting)
-        except Exception as exc:
-            self.last_error = str(exc)
-            self._drop()
-            return
-        if not chunk:
-            return
         with self._lock:
+            port = self._serial
+            if port is None:
+                return
+            try:
+                waiting = port.in_waiting
+                if not waiting:
+                    return
+                chunk = port.read(waiting)
+            except Exception as exc:
+                self.last_error = str(exc)
+                self._close_locked()
+                return
+            if not chunk:
+                return
             self._buffer.extend(chunk)
             for frame in pop_frames(self._buffer):
                 self._observe(frame)
@@ -220,6 +235,8 @@ def _completes(request: int, frame: Frame) -> bool:
     if request == HELLO and frame.msg_type == HELLO_ACK:
         return True
     if request == 13 and frame.msg_type == 14:
+        return True
+    if request == STATUS_REQ and frame.msg_type == STATUS:
         return True
     return frame.msg_type == 12 and bool(frame.payload) and frame.payload[0] == request
 

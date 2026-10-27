@@ -40,6 +40,6 @@ CRC-16/CCITT-FALSE uses polynomial `0x1021`, initial value `0xFFFF`, no reflecti
 
 Axis 1 is pan, 2 is tilt 1, and 3 is tilt 2. Result and fault numbers are the same as the MAVLink RCWM body.
 
-HELLO_ACK is sent at boot and in reply to HELLO. A new boot id means the step reference was lost. The Jetson may send the saved configuration again. It must not send the previous motion rates.
+HELLO_ACK is sent at boot and in reply to HELLO. A new boot id means the step position was restored from the controller's saved store, unless the mount was moved by hand while powered off. The Jetson may send the saved configuration again. It must not send the previous motion rates.
 
 The ESP32 stops commanded motion when MOTION frames stop arriving for the configured control timeout. It does not start moving because a cable was plugged in.

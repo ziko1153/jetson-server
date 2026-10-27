@@ -23,6 +23,7 @@ from app.rcwm.protocol import (
     SELECT,
     STATUS,
     STOP,
+    TIMEOUT,
     decode_config,
     decode_status_body,
     encode_config,
@@ -124,23 +125,23 @@ def test_three_motors_keep_independent_settings(tmp_path: Path) -> None:
         assert decoded.gear_ratio == pytest.approx(config.gear_ratio)
 
 
-def test_ownership_blocks_the_second_station_until_the_lease_expires(tmp_path: Path) -> None:
+def test_ownership_last_writer_wins_and_expires(tmp_path: Path) -> None:
     clock = Clock()
     item = service(tmp_path, clock)
     assert item.handle(255, 190, encode_header(OWNERSHIP, 1, 0, REQUEST))[0][7] == APPLIED
-    assert item.handle(254, 190, encode_header(OWNERSHIP, 1, 0, REQUEST))[0][7] == REJECTED
-    item.handle(255, 190, write_config(1, 2, commissioned()))
-    denied = item.handle(254, 190, motion_command(2, 5, 0, 0))[0]
-    assert denied[7] == REJECTED
+    # A second station takes control immediately; the previous owner loses it.
+    assert item.handle(254, 190, encode_header(OWNERSHIP, 2, 0, REQUEST))[0][7] == APPLIED
     status = decode_status_body(item.handle(255, 190, encode_header(STATUS, 3, 0, REQUEST))[0][8:])
-    assert status["owner_system_id"] == 255
+    assert status["owner_system_id"] == 254
+    # The previous owner can no longer command motion.
+    denied = item.handle(255, 190, motion_command(4, 5, 0, 0))[0]
+    assert denied[7] == REJECTED
+    item.handle(254, 190, write_config(1, 5, commissioned()))
+    # Silence still releases the mount.
     clock.now += 2
     item.maintain()
-    status = decode_status_body(item.handle(255, 190, encode_header(STATUS, 4, 0, REQUEST))[0][8:])
+    status = decode_status_body(item.handle(255, 190, encode_header(STATUS, 6, 0, REQUEST))[0][8:])
     assert status["owner_system_id"] == 0
-    item.handle(254, 190, encode_header(OWNERSHIP, 3, 0, REQUEST))
-    status = decode_status_body(item.handle(254, 190, encode_header(STATUS, 4, 0, REQUEST))[0][8:])
-    assert status["owner_system_id"] == 254
     item.handle(254, 190, encode_header(RELEASE, 5, 0, REQUEST))
     assert item.snapshot()["owner_system_id"] == 0
 
@@ -191,10 +192,13 @@ def test_home_sets_an_estimate_and_restart_clears_it(tmp_path: Path) -> None:
     item.maintain()
     assert item._mount.motion_frames == sent
     status = decode_status_body(item.handle(255, 190, encode_header(STATUS, 8, 0, REQUEST))[0][8:])
-    assert status["axes"][1].reference_invalid is True
-    assert status["axes"][1].estimated_deg is None
-    assert status["axes"][1].estimated_steps is None
-    assert item.snapshot()["reference_kept_across_restart"] is False
+    pan = status["axes"][1]
+    # The controller persists the last halted position, so a reboot keeps the
+    # reference and the angle instead of invalidating them.
+    assert pan.referenced is True
+    assert pan.estimated_deg is not None
+    assert abs(pan.estimated_deg - 36) < 2
+    assert item.snapshot()["reference_kept_across_restart"] is True
     assert item.snapshot()["positions"] == "estimates"
 
 
@@ -229,4 +233,25 @@ def test_serial_motion_frame_reaches_the_simulated_controller() -> None:
     device.restart()
     assert device.view().axes[2].referenced is False
     assert device.energized is False
+
+
+def test_a_late_stick_command_is_dropped_and_a_fresh_one_is_forwarded(tmp_path: Path) -> None:
+    clock = Clock()
+    item = service(tmp_path, clock)
+    item.handle(255, 190, encode_header(OWNERSHIP, 1, 0, REQUEST))
+    item.handle(255, 190, write_config(1, 2, commissioned()))
+    now_ms = int(clock.now * 1000)
+
+    def stamped(request_id: int, stamp: int) -> bytes:
+        body = encode_header(MOTION, request_id, 0, REQUEST) + encode_motion(10, 0, 0)
+        return body + (stamp & 0xFFFFFFFF).to_bytes(4, "little")
+
+    late = item.handle(255, 190, stamped(3, now_ms - 5_000))[0]
+    assert late[7] == TIMEOUT
+    assert item._device.motion_frames == 0
+    ahead = item.handle(255, 190, stamped(4, now_ms + 80))[0]
+    assert ahead[7] == APPLIED
+    fresh = item.handle(255, 190, stamped(5, now_ms - 40))[0]
+    assert fresh[7] == APPLIED
+    assert item._device.motion_frames == 2
 
