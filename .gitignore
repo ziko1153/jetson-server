@@ -8,7 +8,13 @@ __pycache__/
 dist/
 build/
 .env
+# Per-machine configuration. Created from the *.example.json files by the setup scripts.
+config/config.json
+config/cameras.json
+config/mosaic.json
 config/secrets.json
+# Confidential site notes
+agent-notebook/jetson/
 data/**
 !data/.gitkeep
 vendor/mediamtx/*

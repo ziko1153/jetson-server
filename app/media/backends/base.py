@@ -24,7 +24,7 @@ class MediaBackend:
 
     def mosaic_command(
         self,
-        sources: list[str],
+        sources: list[str | None],
         tiles: list[MosaicTile],
         output: MosaicOutput,
         publish_url: str,

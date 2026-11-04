@@ -133,17 +133,28 @@ class OnvifClient:
         return _settings_from(match, supported=True, source="onvif")
 
     def _media_url(self, device_url: str, username: str, password: str) -> str:
+        url = self.service_url(device_url, username, password, "Media")
+        if url is None:
+            raise OnvifError("ONVIF device service did not advertise a media address.")
+        return url
+
+    def service_url(self, device_url: str, username: str, password: str, category: str) -> str | None:
+        """The address a camera advertises for one ONVIF service. Many cameras use one address for all."""
         body = (
             f'<s:Envelope xmlns:s="{SOAP_NS}" xmlns:tds="{DEVICE_NS}">'
             f"<s:Header>{_security_header(username, password)}</s:Header>"
-            "<s:Body><tds:GetCapabilities><tds:Category>Media</tds:Category></tds:GetCapabilities></s:Body>"
+            f"<s:Body><tds:GetCapabilities><tds:Category>{escape(category)}</tds:Category></tds:GetCapabilities></s:Body>"
             "</s:Envelope>"
         )
         root = self._call(device_url, username, password, body, header_already=True)
+        parents = _parent_map(root)
         for element in root.iter():
-            if _local(element.tag) == "XAddr" and element.text and "media" in element.text.lower():
+            if _local(element.tag) != "XAddr" or not element.text:
+                continue
+            parent = parents.get(element)
+            if parent is not None and _local(parent.tag).lower() == category.lower():
                 return element.text.strip()
-        raise OnvifError("ONVIF device service did not advertise a media address.")
+        return None
 
     def _get_profiles(self, media_url: str, username: str, password: str) -> list[EncoderConfiguration]:
         body = (
@@ -218,6 +229,23 @@ class OnvifClient:
                         )
                     )
         return options or profiles
+
+    def request(
+        self,
+        url: str,
+        username: str,
+        password: str,
+        inner: str,
+        namespaces: dict[str, str],
+    ) -> ElementTree.Element:
+        """Sends one SOAP body with a digest login header. ``namespaces`` maps body prefixes to URIs."""
+        declarations = "".join(f' xmlns:{prefix}="{uri}"' for prefix, uri in namespaces.items())
+        body = (
+            f'<s:Envelope xmlns:s="{SOAP_NS}"{declarations}>'
+            f"<s:Header>{_security_header(username, password)}</s:Header>"
+            f"<s:Body>{inner}</s:Body></s:Envelope>"
+        )
+        return self._call(url, username, password, body, header_already=True)
 
     def _call(
         self,
@@ -360,8 +388,11 @@ def _settings_from(encoder: EncoderConfiguration | None, *, supported: bool, sou
     )
 
 
-def _local(tag: str) -> str:
+def local_name(tag: str) -> str:
     return tag.rsplit("}", 1)[-1]
+
+
+_local = local_name
 
 
 def _first_text(element: ElementTree.Element, name: str) -> str | None:

@@ -1,9 +1,13 @@
+import socket
+
 import pytest
 from pydantic import ValidationError
 
+from app.core.environment import GSTREAMER_ELEMENTS
 from app.media.backends.jetson import JetsonBackend
 from app.media.mosaic.layouts import tiles_for, validate_tiles
 from app.media.mosaic.pipeline import ffmpeg_mosaic_command
+from app.media.mosaic.sources import NO_SIGNAL_IMAGE, reachable
 from app.media.rtsp.mediamtx import render_config
 from app.schemas.camera import CameraRecord
 from app.schemas.mosaic import MosaicOutput, MosaicTile
@@ -58,14 +62,64 @@ def test_ffmpeg_command_keeps_urls_as_arguments() -> None:
 def test_jetson_uses_nvidia_encoder_only_when_plugins_exist() -> None:
     output = MosaicOutput(width=640, height=360, fps=10, bitrate_kbps=500, codec="h264")
     tiles = tiles_for("single", ["CAM-001"], output)
-    ready = JetsonBackend("ffmpeg", "gst-launch-1.0", {name: True for name in ("nvv4l2decoder", "nvv4l2h264enc", "nvvidconv")}, True)
+    ready = JetsonBackend("ffmpeg", "gst-launch-1.0", {name: True for name in GSTREAMER_ELEMENTS}, True)
+    no_publisher = JetsonBackend("ffmpeg", "gst-launch-1.0", {name: name != "rtspclientsink" for name in GSTREAMER_ELEMENTS}, True)
     missing = JetsonBackend("ffmpeg", "gst-launch-1.0", {}, True)
     nvidia = ready.mosaic_command(["rtsp://127.0.0.1/live"], tiles, output, "rtsp://127.0.0.1/mosaic")
     software = missing.mosaic_command(["rtsp://127.0.0.1/live"], tiles, output, "rtsp://127.0.0.1/mosaic")
     assert "nvv4l2h264enc" in nvidia
+    assert "parsebin" in nvidia
+    assert "rtph264depay" not in nvidia
     assert ready.capabilities().acceleration == "nvidia"
+    assert no_publisher.capabilities().acceleration == "software"
     assert "libx264" in software
     assert missing.capabilities().acceleration == "software"
+
+
+def test_offline_tiles_are_drawn_as_no_signal() -> None:
+    output = MosaicOutput(width=1280, height=720, fps=15, bitrate_kbps=1500, codec="h264")
+    tiles = tiles_for("grid_2x2", ["CAM-001", "CAM-002", "CAM-003", "CAM-004"], output)
+    sources = [None, "rtsp://127.0.0.1/live", None, None]
+    ready = JetsonBackend("ffmpeg", "gst-launch-1.0", {name: True for name in GSTREAMER_ELEMENTS}, True)
+    nvidia = ready.mosaic_command(sources, tiles, output, "rtsp://127.0.0.1/mosaic")
+    assert nvidia.count("rtspsrc") == 1
+    assert nvidia.count("videotestsrc") == 3
+    assert "text=NO SIGNAL" in nvidia
+    assert nvidia.count("intervideosink") == nvidia.count("intervideosrc") == 1
+    software = ffmpeg_mosaic_command("ffmpeg", sources, tiles, output, "rtsp://127.0.0.1:8554/mosaic")
+    assert software.count(str(NO_SIGNAL_IMAGE)) == 3
+    assert NO_SIGNAL_IMAGE.is_file()
+
+
+def test_mosaic_camera_login_stays_out_of_the_location_and_pixels_are_square() -> None:
+    output = MosaicOutput(width=1280, height=720, fps=15, bitrate_kbps=1500, codec="h264")
+    tiles = tiles_for("single", ["CAM-001"], output)
+    ready = JetsonBackend("ffmpeg", "gst-launch-1.0", {name: True for name in GSTREAMER_ELEMENTS}, True)
+    nvidia = ready.mosaic_command(["rtsp://viewer:p%40ss@10.0.0.5:8554/live1.264"], tiles, output, "rtsp://127.0.0.1/mosaic")
+    assert "location=rtsp://10.0.0.5:8554/live1.264" in nvidia
+    assert "user-id=viewer" in nvidia
+    assert "user-pw=p@ss" in nvidia
+    assert not any("@10.0.0.5" in part for part in nvidia)
+    assert "caps=video/x-raw,pixel-aspect-ratio=(fraction)1/1" in nvidia
+    assert "sink_0::width=1280" in nvidia
+    assert "sink_0::height=720" in nvidia
+    assert "idrinterval=15" in nvidia
+
+
+def test_reachable_reports_only_listening_cameras() -> None:
+    listener = socket.socket()
+    listener.bind(("127.0.0.1", 0))
+    listener.listen()
+    open_port = listener.getsockname()[1]
+    closed = socket.socket()
+    closed.bind(("127.0.0.1", 0))
+    closed_port = closed.getsockname()[1]
+    closed.close()
+    try:
+        live = reachable({"CAM-001": ("127.0.0.1", open_port), "CAM-002": ("127.0.0.1", closed_port)}, timeout=0.5)
+    finally:
+        listener.close()
+    assert live == frozenset({"CAM-001"})
 
 
 def test_mediamtx_config_quotes_paths_and_can_require_playback_token() -> None:

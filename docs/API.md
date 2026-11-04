@@ -181,6 +181,58 @@ curl -sS -X PUT http://127.0.0.1:8080/api/v1/cameras/CAM-001/settings \
 
 A successful body includes `applied_to` of `physical` or `gateway`. A read-only camera returns `422` with code `physical_configuration_unsupported`. Both results are written to the audit log.
 
+### `GET /api/v1/cameras/{camera_id}/encoders`
+
+Purpose: read the camera's own encoders over ONVIF Media2. This includes H.265, which Media1 cannot describe.
+
+```bash
+curl -sS http://127.0.0.1:8080/api/v1/cameras/CAM-001/encoders
+```
+
+Each item in `streams` has `profile_token`, `profile_name`, `encoder_token`, `role` (`main`, `sub`, or `other`, from the camera's profile name), `path` (the RTSP path only, never a login), and `gateway_stream`, which is the gateway's `stream` value that opens the same path. It also has `codec`, `width`, `height`, `fps`, `bitrate_kbps`, `gov_length`, and the camera's `options` for each codec. Errors: `503 camera_unreachable`, `422` when the camera rejects ONVIF.
+
+### `PUT /api/v1/cameras/{camera_id}/encoders/{encoder_token}`
+
+Purpose: change one encoder in the camera. The change is stored in the camera and every viewer sees it.
+
+```bash
+curl -sS -X PUT http://127.0.0.1:8080/api/v1/cameras/CAM-001/encoders/VideoSubEncoder \
+  -H 'content-type: application/json' \
+  -d '{"codec":"H265","width":704,"height":576,"fps":15,"bitrate_kbps":512,"gov_length":15}'
+```
+
+Every field is optional. Values the camera did not list in `options` return `422 validation_failed` before anything is sent. The body is the encoder list read back from the camera after the change. Each attempt is written to the audit log.
+
+### `GET /api/v1/cameras/{camera_id}/ptz`
+
+Purpose: report whether the camera can pan, tilt, zoom, and go home.
+
+```bash
+curl -sS http://127.0.0.1:8080/api/v1/cameras/CAM-001/ptz
+```
+
+`supported` is false with a `note` when the camera reports no PTZ node.
+
+### `POST /api/v1/cameras/{camera_id}/ptz/move`
+
+Purpose: continuous move. Values are velocities from -1 to 1.
+
+```bash
+curl -sS -X POST http://127.0.0.1:8080/api/v1/cameras/CAM-001/ptz/move \
+  -H 'content-type: application/json' \
+  -d '{"pan":0.5,"tilt":0,"zoom":0,"timeout_seconds":1}'
+```
+
+The camera stops by itself after `timeout_seconds` (0.2 to 5). A client that holds a button repeats the move before the timeout and sends `stop` on release. A move with all values at 0 is a stop.
+
+### `POST /api/v1/cameras/{camera_id}/ptz/stop`
+
+Purpose: stop pan, tilt, and zoom.
+
+### `POST /api/v1/cameras/{camera_id}/ptz/home`
+
+Purpose: go to the camera's home position. `422` when the camera reports no home support.
+
 ## Streams
 
 ### `GET /api/v1/streams`
@@ -209,7 +261,7 @@ curl -sS -X POST http://127.0.0.1:8080/api/v1/streams/CAM-001/start \
   -d '{"mode":"passthrough"}'
 ```
 
-Passthrough remuxes. `transcode` decodes and encodes with the gateway profile. Errors: `409 camera_disabled`, `422 resource_limit` when the transcode limit is reached, `503 media_server_unavailable`.
+Passthrough remuxes. `transcode` decodes and encodes with the gateway profile. The gateway stores the mode and `stream` in the camera state and starts the same stream again after a restart. `stop` clears it. Errors: `409 camera_disabled`, `422 resource_limit` when the transcode limit is reached, `503 media_server_unavailable`.
 
 ### `POST /api/v1/streams/{camera_id}/stop`
 
@@ -267,11 +319,17 @@ The macOS simulation uses these same routes. While `scripts/start-simulation.sh`
 
 Purpose: publish the current mosaic. This interrupts an existing mosaic publisher.
 
+The response is sent once the mosaic path is playable, or after `limits.mosaic_ready_timeout_seconds` (default 5), so a viewer can connect right after it returns.
+
 ```bash
 curl -sS -X POST http://127.0.0.1:8080/api/v1/mosaic/start
 ```
 
 Errors: `409 mosaic_disabled`, `503 media_server_unavailable`.
+
+The mosaic does not need every camera. A tile whose camera is disabled, or does not accept a TCP connection on its RTSP port, is drawn as a black `NO SIGNAL` tile. While the mosaic runs, the gateway rechecks those cameras every `limits.mosaic_source_check_seconds` (default 5) and rebuilds the publisher when one comes back or drops out. Viewers see a short interruption when that happens. A disabled camera in a mosaic is no longer rejected with `camera_disabled`.
+
+Camera streams may be H.264 or H.265. The published mosaic is always H.264.
 
 ### `POST /api/v1/mosaic/stop`
 
@@ -281,7 +339,7 @@ curl -sS -X POST http://127.0.0.1:8080/api/v1/mosaic/stop
 
 ### `GET /api/v1/mosaic/status`
 
-Purpose: running flag, pid, restart count, backend name, and acceleration (`software` or `nvidia`).
+Purpose: running flag, pid, restart count, backend name, acceleration (`software` or `nvidia`), and `no_signal`, the camera ids currently drawn as `NO SIGNAL`.
 
 ```bash
 curl -sS http://127.0.0.1:8080/api/v1/mosaic/status

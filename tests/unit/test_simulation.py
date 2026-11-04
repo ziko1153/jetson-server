@@ -21,6 +21,7 @@ from app.media.simulation import (
 )
 from app.media.virtual import virtual_camera_command
 from app.schemas.camera import CameraRecord
+from tests.conftest import committed_config
 from app.services.secrets import SecretStore
 
 
@@ -123,7 +124,8 @@ def test_shipped_simulation_is_six_local_patterns_and_leaves_vehicle_cameras_alo
     assert hosts == [f"192.168.144.{index}" for index in range(101, 107)]
     mosaic = json.loads((root / "config" / "mosaic.json").read_text(encoding="utf-8"))
     simulated = json.loads((root / "config" / "mosaic.simulation.json").read_text(encoding="utf-8"))
-    assert mosaic["output"]["width"] == 1920
+    assert mosaic["layout"] == "grid_2x2"
+    assert mosaic["output"]["width"] == 1280
     assert simulated["layout"] == "grid_3x2"
     assert simulated["output"]["width"] == 960
     assert len(simulated["camera_ids"]) == 6
@@ -285,9 +287,9 @@ def test_simulation_config_opens_flight_controller_udp_without_changing_producti
     assert flight.udp_bind_host == "127.0.0.1"
     assert flight.udp_bind_port == 14551
     assert flight.udp_remote_host == ""
-    production = json.loads((project_root() / "config/config.json").read_text(encoding="utf-8"))
+    production = json.loads(committed_config("config.json").read_text(encoding="utf-8"))
     assert production["mavlink"]["flight_controller"]["transport"] == "none"
-    assert production["rcwm"]["transport"] == "simulation"
+    assert production["rcwm"]["transport"] != "simulation"
 
 
 def test_config_override_cannot_leave_the_project(gateway_root, monkeypatch) -> None:

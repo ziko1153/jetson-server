@@ -14,12 +14,18 @@ from app.core.config import load_settings
 ROOT = Path(__file__).resolve().parents[1]
 
 
+def committed_config(name: str) -> Path:
+    """The committed example of a per-machine config file, so tests never read a machine's own choices."""
+    example = ROOT / "config" / name.replace(".json", ".example.json")
+    return example if example.is_file() else ROOT / "config" / name
+
+
 @pytest.fixture
 def gateway_root(tmp_path: Path) -> Path:
     config_dir = tmp_path / "config"
     config_dir.mkdir()
     for name in ("config.json", "cameras.json", "mosaic.json", "profiles.json"):
-        payload = json.loads((ROOT / "config" / name).read_text(encoding="utf-8"))
+        payload = json.loads(committed_config(name).read_text(encoding="utf-8"))
         if name == "config.json":
             payload["streaming"]["manage_media_server"] = False
             payload["health"]["enabled"] = False

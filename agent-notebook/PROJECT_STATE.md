@@ -16,3 +16,7 @@ Verified on this machine:
 Not run on a Jetson, a Matek, a real ESP32, or the Skydroid G30. Rover SITL was connected through the simulation flight-controller UDP socket and checked with a local ground-station stand-in. The camera simulation was not opened from the G30.
 
 Default camera records remain `CAM-001` through `CAM-006` at `192.168.144.101`–`106`, RTSP port `554`, path `/`. Simulation playback uses `config/cameras.simulation.json`. Production `config/config.json` leaves the flight-controller transport at `none`.
+
+## Camera control (2026-11-03, on the Jetson)
+
+ONVIF Media2 encoders and PTZ are served under `/api/v1/cameras/{id}/encoders` and `/ptz`. Each stream start is remembered and restored after a restart. Camera health checks run every 10 s. Verified read-only on CAM-001, CAM-002 and CAM-004; encoder writes and PTZ moves have not been sent to a real camera by an agent.

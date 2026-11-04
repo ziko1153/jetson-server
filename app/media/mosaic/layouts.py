@@ -52,6 +52,11 @@ def tiles_for(layout: str, camera_ids: list[str], output: MosaicOutput) -> list[
     return tiles
 
 
+def drawn_tiles(tiles: list[MosaicTile]) -> list[MosaicTile]:
+    """Visible tiles in paint order. Mosaic sources are listed in this order."""
+    return [tile for tile in sorted(tiles, key=lambda item: item.z) if tile.visible]
+
+
 def validate_tiles(tiles: list[MosaicTile], output: MosaicOutput) -> None:
     if not tiles:
         raise ValidationFailed("A mosaic needs at least one visible tile.")

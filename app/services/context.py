@@ -20,6 +20,7 @@ from app.media.backends.factory import select_backend
 from app.media.rtsp.mediamtx import MediaMTXServer, render_config
 from app.services.audit_service import AuditService
 from app.services.camera_configuration import CameraConfigurationService
+from app.services.camera_control import CameraControlService
 from app.services.camera_health import CameraHealthMonitor
 from app.services.camera_manager import CameraManager
 from app.services.camera_registry import CameraRegistry
@@ -39,6 +40,7 @@ class AppContext:
     state: CameraStateStore
     health: CameraHealthMonitor
     configuration: CameraConfigurationService
+    control: CameraControlService
     cameras: CameraManager
     streams: StreamManager
     mosaic: MosaicManager
@@ -93,7 +95,7 @@ def build_context(settings: Settings) -> AppContext:
         settings.limits.subprocess_stop_timeout_seconds,
         settings.root / "data" / "run" / "mediamtx.pid",
     )
-    streams = StreamManager(settings, registry, secrets, media, backend)
+    streams = StreamManager(settings, registry, secrets, media, backend, state=state)
     health = CameraHealthMonitor(
         registry,
         state,
@@ -102,6 +104,7 @@ def build_context(settings: Settings) -> AppContext:
         timeout_seconds=settings.health.probe_timeout_seconds,
     )
     configuration = CameraConfigurationService(registry, state, secrets, audit, environment.ffprobe)
+    control = CameraControlService(registry, secrets, audit)
     cameras = CameraManager(settings, registry, state, streams)
     mosaic = MosaicManager(settings, registry, secrets, media, backend)
     rcwm = RcwmService(
@@ -119,6 +122,7 @@ def build_context(settings: Settings) -> AppContext:
         state=state,
         health=health,
         configuration=configuration,
+        control=control,
         cameras=cameras,
         streams=streams,
         mosaic=mosaic,

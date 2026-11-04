@@ -137,6 +137,7 @@ class MosaicStatus(BaseModel):
     error: str | None
     backend: str
     acceleration: str
+    no_signal: list[str] = Field(default_factory=list)
 
 
 class LayoutInfo(BaseModel):

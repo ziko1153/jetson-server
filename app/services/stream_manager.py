@@ -7,7 +7,8 @@ import time
 from datetime import datetime, timezone
 
 from app.core.config import Settings
-from app.core.exceptions import ConflictError, UnavailableError, ValidationFailed
+from app.core.exceptions import ConflictError, GatewayError, UnavailableError, ValidationFailed
+from app.core.logging import get_logger
 from app.infrastructure.networking.urls import direct_rtsp_url, public_rtsp_url, source_rtsp_url
 from app.infrastructure.processes.supervisor import ManagedProcess
 from app.media.backends.base import MediaBackend
@@ -17,7 +18,12 @@ from app.media.rtsp.publisher import local_publish_url
 from app.media.rtsp.session import StreamSession
 from app.schemas.stream import StreamMetrics, StreamView
 from app.services.camera_registry import CameraRegistry
+from app.services.camera_state import CameraStateStore
 from app.services.secrets import SecretStore
+
+log = get_logger(__name__)
+
+RESTORE_HOST = "127.0.0.1"
 
 
 class StreamManager:
@@ -28,12 +34,15 @@ class StreamManager:
         secrets: SecretStore,
         media: MediaMTXServer,
         backend: MediaBackend,
+        *,
+        state: CameraStateStore | None = None,
     ) -> None:
         self._settings = settings
         self._registry = registry
         self._secrets = secrets
         self._media = media
         self._backend = backend
+        self._state = state
         self._lock = threading.Lock()
         self._sessions = {camera.id: StreamSession(camera.id) for camera in registry.list_cameras()}
         self._transcoders: dict[str, ManagedProcess] = {}
@@ -79,6 +88,7 @@ class StreamManager:
             session.stream = stream
             session.error = None
             session.started_monotonic = time.monotonic()
+        self._remember(camera.id, {"mode": mode, "stream": stream})
         return self.view(camera.id, public_host)
 
     def stop(self, camera_id: str, public_host: str, *, force: bool) -> StreamView:
@@ -102,6 +112,7 @@ class StreamManager:
             session.mode = "none"
             session.stream = "main"
             session.started_monotonic = None
+        self._remember(camera.id, None)
         return self.view(camera.id, public_host)
 
     def metrics(self, camera_id: str) -> StreamMetrics:
@@ -158,6 +169,28 @@ class StreamManager:
         source = source_rtsp_url(camera, credentials.username, credentials.password, session.stream)
         on_demand = not (session.phase == "active" and session.mode == "passthrough")
         self._media.upsert(path, passthrough_conf(source, on_demand=on_demand))
+
+    def restore(self) -> None:
+        """Restarts the streams that were running when the gateway last stopped."""
+        if self._state is None:
+            return
+        for camera in self._registry.list_cameras():
+            choice = self._state.get(camera.id).get("stream_choice")
+            if not isinstance(choice, dict) or not camera.enabled:
+                continue
+            mode = choice.get("mode")
+            stream = choice.get("stream", "main")
+            if mode not in {"passthrough", "transcode"} or stream not in {"main", "sub"}:
+                continue
+            try:
+                self.start(camera.id, mode, RESTORE_HOST, stream)
+                log.info("restored stream camera_id=%s mode=%s stream=%s", camera.id, mode, stream)
+            except GatewayError as exc:
+                log.warning("stream restore failed camera_id=%s error=%s", camera.id, exc.message)
+
+    def _remember(self, camera_id: str, choice: dict | None) -> None:
+        if self._state is not None:
+            self._state.update(camera_id, stream_choice=choice)
 
     def terminate_now(self) -> None:
         for process in self._transcoders.values():

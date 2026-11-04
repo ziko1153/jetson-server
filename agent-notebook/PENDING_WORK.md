@@ -12,3 +12,9 @@
 - Set the Matek UART and confirm telemetry with a real flight controller. Rover SITL through the simulation flight-controller socket was checked on this Mac with a stand-in ground station, not from the Skydroid G30.
 - Flash the ESP32 only after the emergency stop and `board.hpp` pin map are confirmed, then set `rcwm.serial_port` and, separately, `rcwm.allow_hardware_motion`.
 - Decide whether MAVLink 2 signing should be added on both the Jetson and the Kotlin ground station. It is not implemented on either side.
+
+## From 2026-11-03
+
+- Per-camera `transcode` runs `ffmpeg` with `libx264` on the CPU. A hardware path (`nvv4l2decoder` and `nvv4l2h264enc`, as the mosaic does) belongs in `app/media/backends/jetson.py`.
+- Consider swapping `path` and `sub_path` in `config/cameras.json` so `main` means the camera's MainStream. Check the mosaic and transcode load first.
+- Encoder `PUT` and PTZ moves have only been exercised with unit tests. An operator should try them on one camera.

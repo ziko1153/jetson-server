@@ -2,36 +2,23 @@
 
 from __future__ import annotations
 
+from app.media.mosaic.layouts import drawn_tiles
+from app.media.mosaic.sources import NO_SIGNAL_IMAGE
 from app.schemas.mosaic import MosaicOutput, MosaicTile
 
 
 def ffmpeg_mosaic_command(
     ffmpeg: str,
-    sources: list[str],
+    sources: list[str | None],
     tiles: list[MosaicTile],
     output: MosaicOutput,
     publish_url: str,
 ) -> list[str]:
-    ordered = [tile for tile in sorted(tiles, key=lambda item: item.z) if tile.visible]
+    ordered = drawn_tiles(tiles)
     command = [ffmpeg, "-hide_banner", "-loglevel", "warning"]
     command.extend(["-f", "lavfi", "-i", f"color=c=black:s={output.width}x{output.height}:r={output.fps}"])
     for source in sources:
-        command.extend(
-            [
-                "-rtsp_transport",
-                "tcp",
-                "-fflags",
-                "nobuffer",
-                "-flags",
-                "low_delay",
-                "-probesize",
-                "32",
-                "-analyzeduration",
-                "1",
-                "-i",
-                source,
-            ]
-        )
+        command.extend(_camera_input(source) if source else _no_signal_input(output.fps))
     filters: list[str] = []
     current = "[0:v]"
     for index, tile in enumerate(ordered):
@@ -119,6 +106,27 @@ def ffmpeg_transcode_command(
         "tcp",
         publish_url,
     ]
+
+
+def _camera_input(source: str) -> list[str]:
+    return [
+        "-rtsp_transport",
+        "tcp",
+        "-fflags",
+        "nobuffer",
+        "-flags",
+        "low_delay",
+        "-probesize",
+        "32",
+        "-analyzeduration",
+        "1",
+        "-i",
+        source,
+    ]
+
+
+def _no_signal_input(fps: int) -> list[str]:
+    return ["-loop", "1", "-framerate", str(fps), "-i", str(NO_SIGNAL_IMAGE)]
 
 
 def _scale(tile: MosaicTile) -> str:

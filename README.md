@@ -36,6 +36,8 @@ Six cameras are defined in `config/cameras.json`. Their IDs are `CAM-001` throug
 
 Usernames and passwords belong in `config/secrets.json`, which is not committed. Copy `config/secrets.example.json`.
 
+`config/config.json`, `config/cameras.json` and `config/mosaic.json` are per-machine and are not committed either. `scripts/setup-jetson.sh` creates them from the `*.example.json` files on a fresh install; edit the real files on the machine, and change the examples only when a new default applies everywhere.
+
 ## RTSP
 
 Individual streams:

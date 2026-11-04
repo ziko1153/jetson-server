@@ -11,6 +11,7 @@ from fastapi import APIRouter, Depends, FastAPI, Request
 from starlette.middleware.base import BaseHTTPMiddleware
 
 from app.api.audit import router as audit_router
+from app.api.camera_control import router as control_router
 from app.api.camera_settings import router as settings_router
 from app.api.cameras import router as cameras_router
 from app.api.deps import require_auth
@@ -63,6 +64,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         app.state.ctx = ctx
         if current.streaming.manage_media_server:
             ctx.media.start(ctx.media_config())
+            ctx.streams.restore()
+            ctx.mosaic.restore()
         ctx.health.start()
         ctx.rcwm.start()
         ctx.mavlink.start()
@@ -91,6 +94,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     api.include_router(health_router)
     api.include_router(cameras_router)
     api.include_router(settings_router)
+    api.include_router(control_router)
     api.include_router(streams_router)
     api.include_router(mosaic_router)
     api.include_router(audit_router)

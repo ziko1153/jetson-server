@@ -109,6 +109,9 @@ class LimitSettings(BaseModel):
     max_transcode_streams: int = Field(default=2, ge=0, le=6)
     mosaic_restart_attempts: int = Field(default=5, ge=0, le=20)
     mosaic_restart_backoff_seconds: float = Field(default=2, ge=0, le=60)
+    mosaic_source_check_seconds: float = Field(default=5, gt=0, le=60)
+    mosaic_source_timeout_seconds: float = Field(default=0.5, gt=0, le=10)
+    mosaic_ready_timeout_seconds: float = Field(default=5, ge=0, le=30)
     subprocess_stop_timeout_seconds: float = Field(default=5, gt=0, le=30)
 
 

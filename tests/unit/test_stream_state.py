@@ -67,3 +67,22 @@ def test_reconnect_count_and_bitrate_need_real_samples(gateway_root) -> None:
     assert second.measured_bitrate_kbps is not None
     assert second.configured_fps == 25
     assert second.measured_fps is None
+
+
+def test_stream_choice_survives_a_restart(gateway_root) -> None:
+    settings = load_settings(gateway_root)
+    ctx = build_context(settings)
+    ctx.streams._media = _Media()
+    ctx.streams.start("CAM-001", "passthrough", "127.0.0.1", "sub")
+    assert ctx.state.get("CAM-001")["stream_choice"] == {"mode": "passthrough", "stream": "sub"}
+
+    restarted = build_context(settings)
+    media = _Media()
+    restarted.streams._media = media
+    restarted.streams.restore()
+    session = restarted.streams._session("CAM-001")
+    assert (session.phase, session.mode, session.stream) == ("active", "passthrough", "sub")
+    assert media.body["sourceOnDemand"] is False
+
+    restarted.streams.stop("CAM-001", "127.0.0.1", force=True)
+    assert restarted.state.get("CAM-001")["stream_choice"] is None

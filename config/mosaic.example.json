@@ -3,21 +3,20 @@
   "revision": 1,
   "owner": null,
   "enabled": true,
-  "layout": "grid_3x2",
+  "layout": "grid_2x2",
   "output": {
-    "width": 1920,
-    "height": 1080,
+    "width": 1280,
+    "height": 720,
     "fps": 15,
-    "bitrate_kbps": 3000,
+    "bitrate_kbps": 1500,
     "codec": "h264",
     "stream_name": "mosaic"
   },
   "camera_ids": [
-    "CAM-001",
-    "CAM-002",
-    "CAM-003",
     "CAM-004",
-    "CAM-005",
-    "CAM-006"
-  ]
+    "CAM-003",
+    "CAM-002",
+    "CAM-001"
+  ],
+  "tiles": null
 }

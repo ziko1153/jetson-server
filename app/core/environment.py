@@ -13,6 +13,8 @@ JETSON_MODEL_PATH = "/proc/device-tree/model"
 JETSON_COMPATIBLE_PATH = "/proc/device-tree/compatible"
 TEGRA_RELEASE_PATH = "/etc/nv_tegra_release"
 NVIDIA_PLUGINS = ("nvv4l2decoder", "nvv4l2h264enc", "nvvidconv")
+MOSAIC_ELEMENTS = ("parsebin", "rtspclientsink")
+GSTREAMER_ELEMENTS = NVIDIA_PLUGINS + MOSAIC_ELEMENTS
 
 _L4T_TO_JETPACK = {
     "32": "4",
@@ -120,7 +122,7 @@ def detect_environment(reader: SystemReader | None = None, mediamtx_path: Path |
             notes.append("Orin NX hardware encoding is expected, and is used only when the plugins are installed.")
 
     mediamtx = str(mediamtx_path) if mediamtx_path and mediamtx_path.is_file() else reader.which("mediamtx")
-    plugins = {name: reader.plugin_available(name) for name in NVIDIA_PLUGINS} if hardware == "jetson" else {}
+    plugins = {name: reader.plugin_available(name) for name in GSTREAMER_ELEMENTS} if hardware == "jetson" else {}
     if hardware != "jetson":
         notes.append("NVIDIA GStreamer plugins are not probed on this hardware.")
 

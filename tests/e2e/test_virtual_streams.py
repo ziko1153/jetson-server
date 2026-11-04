@@ -17,6 +17,7 @@ from app.api.router import create_app
 from app.core.config import load_settings
 from app.infrastructure.processes.supervisor import ManagedProcess
 from app.media.virtual import virtual_camera_command
+from tests.conftest import committed_config
 
 pytestmark = pytest.mark.e2e
 ROOT = Path(__file__).resolve().parents[2]
@@ -150,7 +151,7 @@ def virtual_gateway(tmp_path: Path):
         config_dir = tmp_path / "config"
         config_dir.mkdir()
         for name in ("config.json", "cameras.json", "mosaic.json", "profiles.json"):
-            payload = json.loads((ROOT / "config" / name).read_text(encoding="utf-8"))
+            payload = json.loads(committed_config(name).read_text(encoding="utf-8"))
             if name == "config.json":
                 payload["streaming"]["manage_media_server"] = True
                 payload["streaming"]["rtsp_port"] = gateway_rtsp

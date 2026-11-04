@@ -36,19 +36,22 @@ if ! command -v ffmpeg >/dev/null 2>&1 || ! command -v gst-launch-1.0 >/dev/null
   echo "FFmpeg and GStreamer are required." >&2
   echo "Install the existing JetPack packages, for example:" >&2
   echo "  sudo apt-get update" >&2
-  echo "  sudo apt-get install -y ffmpeg gstreamer1.0-tools gstreamer1.0-plugins-base gstreamer1.0-plugins-good gstreamer1.0-libav" >&2
+  echo "  sudo apt-get install -y ffmpeg gstreamer1.0-tools gstreamer1.0-plugins-base gstreamer1.0-plugins-good gstreamer1.0-libav gstreamer1.0-rtsp" >&2
   echo "Do not install a different CUDA, TensorRT, or JetPack release from this script." >&2
   exit 1
 fi
 
 if command -v gst-inspect-1.0 >/dev/null 2>&1; then
-  for element in nvv4l2decoder nvv4l2h264enc nvvidconv; do
+  for element in nvv4l2decoder nvv4l2h264enc nvvidconv parsebin rtspclientsink; do
     if gst-inspect-1.0 "$element" >/dev/null 2>&1; then
       echo "GStreamer element available: $element"
     else
       echo "GStreamer element missing: $element"
     fi
   done
+  if ! gst-inspect-1.0 rtspclientsink >/dev/null 2>&1; then
+    echo "The NVIDIA mosaic publishes with rtspclientsink. Install it with: sudo apt-get install -y gstreamer1.0-rtsp"
+  fi
 fi
 
 PYTHON=""
@@ -80,6 +83,12 @@ source .venv/bin/activate
 python -m pip install --upgrade pip
 python -m pip install -e ".[dev]"
 
+for name in config cameras mosaic; do
+  if [[ ! -f "config/${name}.json" ]]; then
+    cp "config/${name}.example.json" "config/${name}.json"
+    echo "Created config/${name}.json from the example. Review it before starting the service."
+  fi
+done
 VERSION="$(python -c 'import json; print(json.load(open("config/config.json"))["streaming"]["media_server_version"])')"
 DEST="vendor/mediamtx"
 mkdir -p "$DEST"

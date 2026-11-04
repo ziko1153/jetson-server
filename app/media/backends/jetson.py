@@ -7,6 +7,7 @@ report says so.
 
 from __future__ import annotations
 
+from app.core.environment import GSTREAMER_ELEMENTS
 from app.media.backends.base import BackendCapabilities
 from app.media.backends.software import SoftwareBackend
 from app.media.mosaic.compositor import gstreamer_mosaic_command
@@ -28,8 +29,7 @@ class JetsonBackend(SoftwareBackend):
 
     @property
     def nvidia_ready(self) -> bool:
-        required = ("nvv4l2decoder", "nvv4l2h264enc", "nvvidconv")
-        return bool(self._gstreamer) and all(self._plugins.get(name) for name in required)
+        return bool(self._gstreamer) and all(self._plugins.get(name) for name in GSTREAMER_ELEMENTS)
 
     def capabilities(self) -> BackendCapabilities:
         notes = [
@@ -39,7 +39,11 @@ class JetsonBackend(SoftwareBackend):
         if self._expected is False:
             notes.append("This board does not advertise an Orin NX hardware encoder.")
         if not self.nvidia_ready:
-            notes.append("NVIDIA mosaic elements are unavailable. Mosaic encoding falls back to software FFmpeg.")
+            missing = [name for name in GSTREAMER_ELEMENTS if not self._plugins.get(name)]
+            notes.append(
+                "NVIDIA mosaic elements are unavailable. Mosaic encoding falls back to software FFmpeg. "
+                f"Missing: {', '.join(missing) or 'gst-launch-1.0'}."
+            )
         return BackendCapabilities(
             name="jetson",
             acceleration="nvidia" if self.nvidia_ready else "software",

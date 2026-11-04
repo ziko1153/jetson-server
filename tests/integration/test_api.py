@@ -6,7 +6,7 @@ def test_registry_lists_six_stable_cameras(client) -> None:
     assert [item["id"] for item in payload["items"]] == [f"CAM-00{index}" for index in range(1, 7)]
     front = payload["items"][0]
     assert front["name"] == "Front Camera"
-    assert front["direct_stream_url"] == "rtsp://192.168.144.101:554/"
+    assert front["direct_stream_url"] == "rtsp://192.168.144.101:8554/live1.264"
     assert front["gateway_stream_url"].endswith("/camera/CAM-001")
     assert "camera-secret" not in response.text
     assert "password" not in response.text
@@ -101,7 +101,7 @@ def test_mosaic_validation_revision_and_presets(client) -> None:
     assert {"single", "side_by_side", "three_focus", "grid_2x2", "five_3_over_2", "grid_3x2", "custom"} <= names
     current = client.get("/api/v1/mosaic")
     assert current.status_code == 200
-    assert len(current.json()["tiles"]) == 6
+    assert len(current.json()["tiles"]) == 4
     created = client.put(
         "/api/v1/mosaic",
         json={

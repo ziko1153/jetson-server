@@ -14,3 +14,9 @@
 - RCWM session for two ground stations, simulated ESP32, and the versioned USB serial protocol.
 - ESP32 PlatformIO firmware that refuses to pulse GPIO until the pin map is confirmed, plus a host build of the codec and planner.
 - System status extended with host, camera, MAVLink, ESP32, and RCWM fields.
+
+## 2026-11-03
+
+- ONVIF Media2 encoder read/write and PTZ continuous move, stop and home.
+- Stream mode and source survive a gateway restart.
+- Camera TCP health checks are on for the Jetson.
