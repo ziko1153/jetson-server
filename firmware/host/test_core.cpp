@@ -3,6 +3,8 @@
 #include <string>
 
 #include "../esp32/include/motion.hpp"
+#include "../esp32/include/outputs.hpp"
+#include "../esp32/include/patrol.hpp"
 #include "../esp32/include/protocol.hpp"
 
 static void testCrcAndFrame() {
@@ -224,7 +226,141 @@ static void testRestorePositionAfterRestart() {
     assert(!planner.axis(2).referenced);
 }
 
+static void testOutputsMaskAndWatchdog() {
+    const int pins[OutputBank::kCount] = {14, 16, 17};
+    OutputBank bank(pins, true, 5000);
+    bank.begin();
+    assert(bank.mask() == 0);
+    assert(!bank.apply(0x08));
+    assert(bank.mask() == 0);
+    bank.heard(1000);
+    assert(bank.apply(0x05));
+    assert(bank.mask() == 0x05);
+    bank.service(5900);
+    assert(bank.mask() == 0x05);
+    bank.heard(5900);
+    bank.service(10800);
+    assert(bank.mask() == 0x05);
+    bank.service(10901);
+    assert(bank.mask() == 0);
+
+    const int partial[OutputBank::kCount] = {14, -1, 17};
+    OutputBank unwired(partial, true, 5000);
+    unwired.begin();
+    assert(!unwired.apply(0x02));
+    assert(unwired.apply(0x04));
+}
+
+static void testOutputsNeverHeardSwitchOff() {
+    const int pins[OutputBank::kCount] = {14, 16, 17};
+    OutputBank bank(pins, true, 5000);
+    bank.begin();
+    assert(bank.apply(0x01));
+    bank.service(1);
+    assert(bank.mask() == 0);
+}
+
+static void configurePatrolAxis(AxisPlan& item) {
+    item.enabled = true;
+    item.maxSpeed = 30;
+    item.maxAccel = 20;
+    item.maxDecel = 20;
+    item.stepsPerRevolution = 3600;
+    item.gearRatio = 1;
+    item.minAngleSet = true;
+    item.minAngle = -90;
+    item.maxAngleSet = true;
+    item.maxAngle = 180;
+}
+
+static void testPatrolStaysInsideRange() {
+    MotionPlanner planner(true);
+    configurePatrolAxis(planner.axis(1));
+    planner.setHome(1);
+    PanPatrol patrol;
+    assert(patrol.start(planner, -20, 40, 25) == PanPatrol::kReasonNone);
+    float low = 0, high = 0;
+    float t = 1.0f;
+    for (int step = 0; step < 6000; ++step, t += 0.01f) {
+        patrol.service(planner, t);
+        planner.advance(0.01f, t);
+        low = std::min(low, planner.degreesAt(1));
+        high = std::max(high, planner.degreesAt(1));
+    }
+    assert(patrol.active());
+    assert(low >= -20.f && low < -19.f);
+    assert(high <= 40.f && high > 39.f);
+    const std::vector<uint8_t> block = patrol.statusBlock();
+    assert(block.size() == PanPatrol::kStatusSize);
+    assert(block[0] == 1);
+    assert(static_cast<int16_t>(block[2] | (block[3] << 8)) == -2000);
+    patrol.stop(planner, PanPatrol::kReasonOperator);
+    assert(!patrol.active());
+    assert(planner.axis(1).commanded == 0.f);
+    assert(patrol.statusBlock()[1] == PanPatrol::kReasonOperator);
+}
+
+static void testPatrolRefusesUnsafeRequests() {
+    MotionPlanner planner(true);
+    PanPatrol patrol;
+    configurePatrolAxis(planner.axis(1));
+    assert(patrol.start(planner, -20, 40, 25) == PanPatrol::kReasonNoReference);
+    planner.setHome(1);
+    assert(patrol.start(planner, -100, 40, 25) == PanPatrol::kReasonOutsideLimits);
+    assert(patrol.start(planner, -20, 190, 25) == PanPatrol::kReasonOutsideLimits);
+    assert(patrol.start(planner, 10, 10.5f, 25) == PanPatrol::kReasonRange);
+    assert(patrol.start(planner, -20, 40, 31) == PanPatrol::kReasonSpeed);
+    assert(patrol.start(planner, -20, 40, 0) == PanPatrol::kReasonSpeed);
+    planner.axis(1).maxAngleSet = false;
+    assert(patrol.start(planner, -20, 40, 25) == PanPatrol::kReasonNoLimits);
+    assert(!patrol.active());
+    MotionPlanner blocked(false);
+    configurePatrolAxis(blocked.axis(1));
+    assert(patrol.start(blocked, -20, 40, 25) == PanPatrol::kReasonDisabled);
+}
+
+static void testPatrolStopsWhenConfigBreaks() {
+    MotionPlanner planner(true);
+    configurePatrolAxis(planner.axis(1));
+    planner.setHome(1);
+    PanPatrol patrol;
+    assert(patrol.start(planner, -20, 40, 25) == PanPatrol::kReasonNone);
+    planner.axis(1).maxAngle = 30;
+    patrol.service(planner, 1.0f);
+    assert(!patrol.active());
+    assert(patrol.statusBlock()[1] == PanPatrol::kReasonOutsideLimits);
+    assert(planner.axis(1).commanded == 0.f);
+}
+
+static void testPatrolReleasesQuietTiltWithoutHaltingPan() {
+    MotionPlanner planner(true);
+    configurePatrolAxis(planner.axis(1));
+    configurePatrolAxis(planner.axis(2));
+    planner.setHome(1);
+    planner.setHome(2);
+    planner.select(2);
+    PanPatrol patrol;
+    assert(patrol.start(planner, -20, 40, 25) == PanPatrol::kReasonNone);
+    assert(planner.motion(0, 5, 0, 1.0f) == kApplied);
+    patrol.noteJoystick(1.0f, true);
+    float t = 1.0f;
+    for (int step = 0; step < 100; ++step, t += 0.01f) {
+        patrol.service(planner, t);
+        planner.advance(0.01f, t);
+    }
+    assert(!planner.timedOut());
+    assert(planner.axis(2).commanded == 0.f);
+    assert(planner.axis(1).commanded != 0.f);
+    assert(patrol.active());
+}
+
 int main() {
+    testPatrolStaysInsideRange();
+    testPatrolRefusesUnsafeRequests();
+    testPatrolStopsWhenConfigBreaks();
+    testPatrolReleasesQuietTiltWithoutHaltingPan();
+    testOutputsMaskAndWatchdog();
+    testOutputsNeverHeardSwitchOff();
     testCrcAndFrame();
     testBlockedHardwareDoesNotRun();
     testRampTimeoutAndHome();

@@ -25,6 +25,8 @@ SET_HOME = 11
 ACK = 12
 PING = 13
 PONG = 14
+OUTPUTS = 15
+PATROL = 16
 
 
 @dataclass(frozen=True)

@@ -14,6 +14,22 @@ The firmware is a PlatformIO project at `firmware/esp32`. It is the water-mount 
 
 PUL-/DIR-/ENA- all tie to ESP32 GND. The STEP/DIR pairs are required per axis. ENABLE is optional per axis: leave it at `-1` while the driver ENA input is unwired and set `kEnablePolarity` (0 active low, 1 active high) only when at least one enable pin is wired. With a pin set, the firmware auto-enables on motion and releases the driver shortly after a stop. None of these GPIOs are input-only, flash, or strapping pins.
 
+## Water outputs
+
+`firmware/esp32/include/outputs.hpp` drives three active-high SSR inputs, on/off only:
+
+| Output | Mask bit | Tilt | GPIO |
+| --- | --- | --- | --- |
+| MG FIRE | 0 | Tilt 1 | 14 |
+| RL-1 | 1 | Tilt 2 | 16 |
+| RL-2 | 2 | Tilt 2 | 17 |
+
+The output module does not share state with the motion planner or the step engine. Outputs are off at boot, ignore STOP, and switch off after 5 seconds without a frame from the Jetson. GPIO 14 can pulse briefly while the ROM boots, before the firmware drives it low. GPIO 16 and 17 are free on a WROOM-32 only. A WROVER module uses them for PSRAM.
+
+## Pan patrol
+
+`firmware/esp32/include/patrol.hpp` sweeps pan between two angles (serial type 16). It only sets the pan target through the planner's public accessor, so the step engine and `motion.hpp` are unchanged. It runs before `planner.advance` every loop and rechecks that pan is enabled, configured, referenced, and that the range sits inside the applied pan limits; a failed check stops it. It turns around early enough to stop inside the range at the configured deceleration. While it runs, MOTION with a non-zero pan rate is refused and tilt still follows the stick. A lost link, STOP, or lease expiry does not end patrol; a patrol stop, a restart, or a failed check does. Host tests in `firmware/host/test_core.cpp` cover the range, refusals, broken configuration, and a quiet tilt stick.
+
 ## Commissioning gates
 
 Before commanding real motors, an operator has to:

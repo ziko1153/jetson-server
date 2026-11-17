@@ -8,6 +8,8 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+from app.rcwm.patrol import PatrolView
+
 
 @dataclass
 class MotorConfig:
@@ -87,6 +89,8 @@ class MountView:
     active_tilt: int
     fault_code: int
     axes: dict[int, AxisView]
+    outputs: int | None = None
+    patrol: PatrolView | None = None
 
     def to_public(self) -> dict:
         names = {1: "pan", 2: "tilt_1", 3: "tilt_2"}
@@ -97,4 +101,12 @@ class MountView:
             "active_tilt": names.get(self.active_tilt, "none"),
             "fault_code": self.fault_code,
             "axes": {names[key]: value.to_dict() for key, value in self.axes.items()},
+            "outputs": _outputs_public(self.outputs),
+            "patrol": None if self.patrol is None else self.patrol.to_dict(),
         }
+
+
+def _outputs_public(mask: int | None) -> dict | None:
+    if mask is None:
+        return None
+    return {f"wpn_{index + 1}": bool(mask & (1 << index)) for index in range(3)}

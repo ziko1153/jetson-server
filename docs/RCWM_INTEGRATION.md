@@ -26,6 +26,22 @@ Only pan and the selected tilt may be nonzero. Selecting the other tilt zeroes t
 
 Motion commands must be repeated. If they stop for the control timeout (500 ms when the ground station leaves the timeout unset), the mount stops and releases the software enable. That timeout is not a travel limit.
 
+## Water outputs
+
+Opcode 12 (OUTPUTS) sets the WPN-1..WPN-3 mask. The request payload is one byte. Bit 0 is WPN-1. Only the owner may change it. The reply is an ack, followed by the mask the ESP32 applied.
+
+The status reply carries the mask as one byte after the controller clock (offset 52 of the body). It is absent when the ESP32 firmware has no outputs. `GET /api/v1/system/status` shows it under `rcwm.outputs`.
+
+Stop does not switch the outputs off, because the ground station sends Stop whenever the stick returns to centre. When the owner lease expires or the owner releases control, the Jetson switches every output off. The ESP32 does the same after 5 seconds with no frame from the Jetson. The arming switch (Fire Safe) lives on the ground station only.
+
+## Patrol
+
+Opcode 13 (PATROL) starts or stops the ESP32 pan patrol. The payload is the serial PATROL payload (see `RCWM_SERIAL_PROTOCOL.md`). Only the owner may send it. Start is refused with SAFETY on the serial transport while `rcwm.allow_hardware_motion` is false. The reply is an ack followed by the patrol reason byte.
+
+The status reply carries the 8-byte patrol block after the outputs byte (offset 53 of the body). `GET /api/v1/system/status` shows it under `rcwm.patrol`.
+
+Patrol is not stopped when the owner lease expires or the owner releases control. It runs on the ESP32 until an owner stops it.
+
 ## Transports
 
 `rcwm.transport` is `simulation` or `serial`.

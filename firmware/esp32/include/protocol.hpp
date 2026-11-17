@@ -26,6 +26,8 @@ enum FrameType : uint8_t {
     kAck = 12,
     kPing = 13,
     kPong = 14,
+    kOutputs = 15,
+    kPatrol = 16,
 };
 
 struct SerialFrame {

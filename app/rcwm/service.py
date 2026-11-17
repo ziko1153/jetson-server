@@ -11,6 +11,7 @@ import math
 import threading
 
 from app.core.config import RcwmSettings
+from app.rcwm import patrol
 from app.rcwm.device import Esp32Device
 from app.rcwm.models import MotorConfig
 from app.rcwm.mount import SerialMount, SimulatedMount
@@ -25,7 +26,10 @@ from app.rcwm.protocol import (
     FAULT_REFERENCE,
     HOME,
     MOTION,
+    OUTPUT_MASK,
+    OUTPUTS,
     OWNERSHIP,
+    PATROL,
     POSITIONS,
     REJECTED,
     RELEASE,
@@ -58,6 +62,8 @@ from app.rcwm.protocol import (
     parse_request,
 )
 from app.rcwm.serial_protocol import ACK, CONFIG_GET, CONFIG_REPLY, CONFIG_SET, MOTION as SERIAL_MOTION
+from app.rcwm.serial_protocol import OUTPUTS as SERIAL_OUTPUTS
+from app.rcwm.serial_protocol import PATROL as SERIAL_PATROL
 from app.rcwm.serial_protocol import SELECT as SERIAL_SELECT
 from app.rcwm.serial_protocol import SET_HOME, STOP as SERIAL_STOP
 from app.rcwm.validate import validate_motor
@@ -161,6 +167,8 @@ class RcwmService:
                 "active_tilt": _AXIS_NAMES.get(view.active_tilt, "none") if view else "none",
                 "fault_code": view.fault_code if view else FAULT_ESP32_SILENT,
                 "axes": view.to_public()["axes"] if view else {},
+                "outputs": view.to_public()["outputs"] if view and connected else None,
+                "patrol": view.to_public()["patrol"] if view and connected else None,
             }
 
     def _loop(self) -> None:
@@ -187,6 +195,7 @@ class RcwmService:
         if self._owner and now - self._owner_seen > self._settings.owner_timeout_seconds:
             self._owner = 0
             self._exchange(SERIAL_STOP, b"")
+            self._outputs_off()
 
     def _dispatch(self, system_id: int, request: Request) -> list[bytes]:
         opcode = request.opcode
@@ -209,6 +218,10 @@ class RcwmService:
             return [self._take_ownership(system_id, request)]
         if opcode == RELEASE:
             return [self._release(system_id, request)]
+        if opcode == OUTPUTS:
+            return [self._set_outputs(system_id, request)]
+        if opcode == PATROL:
+            return [self._patrol(system_id, request)]
         return [encode_ack(opcode, request.request_id, request.axis, 5)]
 
     def _status_packet(self, request: Request) -> bytes:
@@ -233,6 +246,11 @@ class RcwmService:
         # The GCS stamps stick commands with this clock so a late packet can be dropped.
         clock_ms = int(self._clock() * 1000) & 0xFFFFFFFF
         body += clock_ms.to_bytes(4, "little")
+        # Absent when the ESP32 firmware has no outputs, so the GCS can tell.
+        if view.connected and view.outputs is not None:
+            body += bytes([view.outputs & OUTPUT_MASK])
+            if view.patrol is not None:
+                body += patrol.encode_block(view.patrol)
         return encode_status(request.request_id, request.opcode, body)
 
     def _read_config(self, request: Request) -> bytes:
@@ -323,7 +341,44 @@ class RcwmService:
             return encode_ack(RELEASE, request.request_id, 0, REJECTED)
         self._owner = 0
         self._exchange(SERIAL_STOP, b"")
+        self._outputs_off()
         return encode_ack(RELEASE, request.request_id, 0, APPLIED)
+
+    def _set_outputs(self, system_id: int, request: Request) -> bytes:
+        if not self._owns(system_id):
+            return self._denied(request)
+        if not request.payload or request.payload[0] & ~OUTPUT_MASK:
+            return encode_ack(OUTPUTS, request.request_id, 0, REJECTED)
+        replies = self._exchange(SERIAL_OUTPUTS, bytes([request.payload[0]]))
+        result = _ack_result(replies, SERIAL_OUTPUTS)
+        if result is None:
+            return encode_ack(OUTPUTS, request.request_id, 0, UNAVAILABLE)
+        reply = encode_ack(OUTPUTS, request.request_id, 0, result)
+        actual = _outputs_mask(replies)
+        return reply if actual is None else reply + bytes([actual])
+
+    def _patrol(self, system_id: int, request: Request) -> bytes:
+        # Patrol is not stopped on lease loss or release: it runs on the ESP32
+        # until an owner stops it, the software stop is pressed, or a check fails.
+        if not self._owns(system_id):
+            return self._denied(request)
+        if not patrol.valid_request(request.payload):
+            return encode_ack(PATROL, request.request_id, 0, REJECTED) + bytes([patrol.REASON_RANGE])
+        starting = request.payload[0] == patrol.ACTION_START
+        if starting and self._settings.transport == "serial" and not self._settings.allow_hardware_motion:
+            return encode_ack(PATROL, request.request_id, 0, SAFETY) + bytes([patrol.REASON_DISABLED])
+        payload = request.payload[:7] if starting else request.payload[:1]
+        replies = self._exchange(SERIAL_PATROL, payload)
+        result = _ack_result(replies, SERIAL_PATROL)
+        if result is None:
+            return encode_ack(PATROL, request.request_id, 0, UNAVAILABLE)
+        return encode_ack(PATROL, request.request_id, 0, result) + bytes([_patrol_reason(replies)])
+
+    def _outputs_off(self) -> None:
+        # A lost or released station must not leave water running.
+        view = self._mount.view()
+        if view.connected and view.outputs != 0:
+            self._exchange(SERIAL_OUTPUTS, bytes([0]))
 
     def _owns(self, system_id: int) -> bool:
         return self._owner == system_id and not self._owner_expired()
@@ -428,6 +483,20 @@ def _ack_frame(replies, msg_type: int) -> tuple[int | None, int]:
                 return REJECTED, fault
             return frame.payload[1], fault
     return TIMEOUT, 0
+
+
+def _outputs_mask(replies) -> int | None:
+    for frame in replies:
+        if frame.msg_type == ACK and len(frame.payload) >= 4 and frame.payload[0] == SERIAL_OUTPUTS:
+            return frame.payload[3] & OUTPUT_MASK
+    return None
+
+
+def _patrol_reason(replies) -> int:
+    for frame in replies:
+        if frame.msg_type == ACK and len(frame.payload) >= 4 and frame.payload[0] == SERIAL_PATROL:
+            return frame.payload[3]
+    return patrol.REASON_NONE
 
 
 def _config_frame(replies) -> tuple[MotorConfig, bool] | None:

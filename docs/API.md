@@ -67,7 +67,7 @@ Added objects:
 - `cameras` — media server and camera health-check state
 - `host` — CPU, memory, disk, host uptime, `temperature_c`, `gpu_percent`, `nvidia_metrics`, Jetson model, L4T, and JetPack family
 - `mavlink` — bind address, peers, flight-controller link, and forward counters
-- `rcwm` and `esp32` — mount transport, ownership, connection, and estimated axes
+- `rcwm` and `esp32` — mount transport, ownership, connection, and estimated axes. `rcwm.outputs` is `{wpn_1, wpn_2, wpn_3}` as booleans, or null while the ESP32 is offline or its firmware has no outputs. `rcwm.patrol` is `{active, reason, min_deg, max_deg, speed_dps}`, or null the same way
 
 On macOS, `temperature_c` and `gpu_percent` are null and `nvidia_metrics` is `unavailable`. A missing sensor is null on a Jetson as well. The route does not invent a measurement.
 

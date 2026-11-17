@@ -6,6 +6,8 @@
 
 #include "board.hpp"
 #include "motion.hpp"
+#include "outputs.hpp"
+#include "patrol.hpp"
 #include "protocol.hpp"
 
 namespace {
@@ -40,6 +42,8 @@ FastAccelStepperEngine engine;
 FastAccelStepper* motors[4] = {nullptr, nullptr, nullptr, nullptr};
 
 MotionPlanner planner(kPinsOk);
+OutputBank outputs(BoardConfig::kWpnPins, BoardConfig::kWpnActiveHigh, BoardConfig::kWpnWatchdogMs);
+PanPatrol patrol;
 FrameParser parser;
 uint32_t bootId = 0;
 bool energized = false;
@@ -54,6 +58,38 @@ bool writeFrame(const std::vector<uint8_t>& frame, bool droppable) {
     if (droppable && Serial.availableForWrite() < static_cast<int>(frame.size())) return false;
     Serial.write(frame.data(), frame.size());
     return true;
+}
+
+// The 48-byte planner status, the output mask, then the patrol block. A Jetson
+// that predates them reads the first 48 bytes and ignores the rest.
+std::vector<uint8_t> statusPayload() {
+    std::vector<uint8_t> body = planner.statusBody();
+    body.push_back(outputs.mask());
+    const std::vector<uint8_t> block = patrol.statusBlock();
+    body.insert(body.end(), block.begin(), block.end());
+    return body;
+}
+
+int16_t readI16(const std::vector<uint8_t>& b, size_t at) {
+    return static_cast<int16_t>(static_cast<uint16_t>(b[at] | (b[at + 1] << 8)));
+}
+
+// action 0 stops; action 1 starts with min, max (centi-degrees) and speed (centi-degrees/second).
+void handlePatrol(const SerialFrame& frame) {
+    const std::vector<uint8_t>& p = frame.payload;
+    uint8_t reason = PanPatrol::kReasonRange;
+    if (p.size() >= 1 && p[0] == 0) {
+        patrol.stop(planner, PanPatrol::kReasonOperator);
+        reason = PanPatrol::kReasonNone;
+    } else if (p.size() >= 7 && p[0] == 1) {
+        const float minDeg = readI16(p, 1) / 100.0f;
+        const float maxDeg = readI16(p, 3) / 100.0f;
+        const float speed = static_cast<uint16_t>(p[5] | (p[6] << 8)) / 100.0f;
+        reason = patrol.start(planner, minDeg, maxDeg, speed);
+        if (reason == PanPatrol::kReasonNone) planner.clearTimeoutFault();
+    }
+    const uint8_t result = reason == PanPatrol::kReasonNone ? kApplied : kRejected;
+    writeFrame(encodeFrame(kAck, frame.sequence, {kPatrol, result, kFaultNone, reason}), false);
 }
 
 std::vector<uint8_t> helloAckPayload() {
@@ -122,6 +158,17 @@ void stopMotors() {
 }
 
 void handle(const SerialFrame& frame) {
+    outputs.heard(millis());
+    if (frame.type == kOutputs) {
+        const bool ok = !frame.payload.empty() && outputs.apply(frame.payload[0]);
+        const uint8_t result = ok ? kApplied : kRejected;
+        writeFrame(encodeFrame(kAck, frame.sequence, {kOutputs, result, kFaultNone, outputs.mask()}), false);
+        return;
+    }
+    if (frame.type == kPatrol) {
+        handlePatrol(frame);
+        return;
+    }
     if (frame.type == kHello) {
         writeFrame(encodeFrame(kHelloAck, frame.sequence, helloAckPayload()), false);
         return;
@@ -131,7 +178,7 @@ void handle(const SerialFrame& frame) {
         return;
     }
     if (frame.type == kStatusReq) {
-        writeFrame(encodeFrame(kStatus, frame.sequence, planner.statusBody()), false);
+        writeFrame(encodeFrame(kStatus, frame.sequence, statusPayload()), false);
         return;
     }
     if (frame.type == kConfigGet && !frame.payload.empty()) {
@@ -169,8 +216,14 @@ void handle(const SerialFrame& frame) {
     if (frame.type == kMotion && frame.payload.size() >= 12) {
         float rates[3] = {};
         memcpy(rates, frame.payload.data(), sizeof(rates));
+        if (patrol.active() && rates[0] != 0.f) {
+            writeFrame(ack(frame.sequence, kMotion, kRejected), false);
+            return;
+        }
         uint8_t fault = 0;
-        const int result = planner.motion(rates[0], rates[1], rates[2], millis() / 1000.0f, &fault);
+        const float nowS = millis() / 1000.0f;
+        const int result = planner.motion(rates[0], rates[1], rates[2], nowS, &fault);
+        if (result == kApplied) patrol.noteJoystick(nowS, rates[1] != 0.f || rates[2] != 0.f);
         writeFrame(ack(frame.sequence, kMotion, static_cast<uint8_t>(result), fault), false);
         return;
     }
@@ -197,6 +250,7 @@ void handle(const SerialFrame& frame) {
 }  // namespace
 
 void setup() {
+    outputs.begin();
     Serial.setRxBufferSize(1024);
     Serial.setTxBufferSize(1024);
     Serial.begin(BoardConfig::kBaud);
@@ -245,7 +299,9 @@ void loop() {
 
     for (int axis = 1; axis <= 3; ++axis) settleMotor(axis);
 
-    // 2. Ramp toward the commanded rates and enforce travel limits.
+    // 2. Ramp toward the commanded rates and enforce travel limits. Patrol
+    //    sets the pan rate first, so a joystick STOP never reaches the ramp.
+    patrol.service(planner, now / 1000.0f);
     planner.advance(dt, now / 1000.0f);
 
     // 3. Push the current rates to the pulse engines.
@@ -273,6 +329,7 @@ void loop() {
         SerialFrame frame;
         while (parser.next(frame)) handle(frame);
     }
+    outputs.service(millis());
 
     if (planner.timedOut()) {
         stopMotors();
@@ -293,6 +350,6 @@ void loop() {
     // serial buffer and stall the loop.
     static uint32_t lastStatusMs = 0;
     if (now - lastStatusMs >= 250) {
-        if (writeFrame(encodeFrame(kStatus, 0, planner.statusBody()), true)) lastStatusMs = now;
+        if (writeFrame(encodeFrame(kStatus, 0, statusPayload()), true)) lastStatusMs = now;
     }
 }

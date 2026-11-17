@@ -20,3 +20,8 @@
 - ONVIF Media2 encoder read/write and PTZ continuous move, stop and home.
 - Stream mode and source survive a gateway restart.
 - Camera TCP health checks are on for the Jetson.
+
+## 2026-11-06
+
+- ESP32 SSR outputs MG FIRE / RL-1 / RL-2 (GPIO 14, 16, 17) with a link watchdog, serial type 15, MAVLink RC opcode 12, and the outputs mask in status and `GET /api/v1/system/status`.
+- ESP32 pan patrol (serial type 16, MAVLink RC opcode 13), patrol block in status, `rcwm.patrol` in the system status, simulator support, and tests.

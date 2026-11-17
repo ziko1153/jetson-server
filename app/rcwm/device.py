@@ -9,6 +9,7 @@ from __future__ import annotations
 import time
 from dataclasses import dataclass, field
 
+from app.rcwm import patrol
 from app.rcwm.models import AxisView, MotorConfig, MountView
 from app.rcwm.protocol import (
     APPLIED,
@@ -16,6 +17,7 @@ from app.rcwm.protocol import (
     FAULT_NONE,
     FAULT_REFERENCE,
     FAULT_TIMEOUT,
+    OUTPUT_MASK,
     REJECTED,
     SAFETY,
     UNSUPPORTED,
@@ -31,6 +33,8 @@ from app.rcwm.serial_protocol import (
     HELLO,
     HELLO_ACK,
     MOTION,
+    OUTPUTS,
+    PATROL,
     PING,
     PONG,
     SELECT,
@@ -71,11 +75,15 @@ class Esp32Device:
         self.last_motion = self._clock()
         self._buffer = bytearray()
         self.motion_frames = 0
+        self.outputs = 0
+        self.patrol = patrol.SimulatedPatrol()
 
     def restart(self) -> None:
         self.boot_id = (self.boot_id + 1) & 0xFFFFFFFF
         self.active_tilt = 0
         self.energized = False
+        self.outputs = 0
+        self.patrol = patrol.SimulatedPatrol()
         self.fault_code = FAULT_NONE
         for axis in self.axes.values():
             # The controller keeps the last halted position in NVS, so a reboot
@@ -102,7 +110,9 @@ class Esp32Device:
     def advance(self, dt: float) -> None:
         if dt < 0:
             return
-        if self._moving() and self._clock() - self.last_motion > self._timeout():
+        if self.patrol.active:
+            self._service_patrol()
+        elif self._moving() and self._clock() - self.last_motion > self._timeout():
             self._halt(immediate=True)
             self.energized = False
             self.fault_code = FAULT_TIMEOUT
@@ -110,6 +120,16 @@ class Esp32Device:
         for axis in self.axes.values():
             axis.current_dps = _ramp(axis, dt)
             self._integrate(axis, dt)
+
+    def _service_patrol(self) -> None:
+        pan = self.axes[1]
+        rate = self.patrol.rate(pan, self._degrees(pan))
+        if rate is not None:
+            pan.commanded_dps = rate
+        # A quiet tilt stick ramps down; patrol pan keeps going.
+        if self._clock() - self.last_motion > self._timeout():
+            for axis_id in (2, 3):
+                self.axes[axis_id].commanded_dps = 0.0
 
     def view(self) -> MountView:
         return MountView(
@@ -119,6 +139,8 @@ class Esp32Device:
             active_tilt=self.active_tilt,
             fault_code=self.fault_code,
             axes={axis_id: self._axis_view(axis_id) for axis_id in AXES},
+            outputs=self.outputs,
+            patrol=self.patrol.view,
         )
 
     def _dispatch(self, frame: Frame) -> list[Frame]:
@@ -141,7 +163,41 @@ class Esp32Device:
             return self._stop(frame)
         if kind == SET_HOME:
             return self._home(frame)
+        if kind == OUTPUTS:
+            return self._outputs(frame)
+        if kind == PATROL:
+            return self._patrol(frame)
         return [self._ack(frame, UNSUPPORTED, FAULT_NONE)]
+
+    def _patrol(self, frame: Frame) -> list[Frame]:
+        pan = self.axes[1]
+        if not patrol.valid_request(frame.payload):
+            reason = patrol.REASON_RANGE
+        elif frame.payload[0] == patrol.ACTION_STOP:
+            self.patrol.stop(pan, patrol.REASON_OPERATOR)
+            reason = patrol.REASON_NONE
+        else:
+            low, high, speed = patrol.parse_start(frame.payload)
+            reason = self.patrol.start(pan, low, high, speed, self._degrees(pan))
+            if reason == patrol.REASON_NONE:
+                self.fault_code = FAULT_NONE
+                self.energized = True
+        result = APPLIED if reason == patrol.REASON_NONE else REJECTED
+        return [Frame(ACK, frame.sequence, bytes([PATROL, result, FAULT_NONE, reason]))]
+
+    @staticmethod
+    def _degrees(axis: _Axis) -> float | None:
+        if not axis.referenced or axis.steps is None:
+            return None
+        return output_degrees(axis.steps, axis.config.steps_per_revolution, axis.config.gear_ratio)
+
+    def _outputs(self, frame: Frame) -> list[Frame]:
+        if not frame.payload or frame.payload[0] & ~OUTPUT_MASK:
+            result = REJECTED
+        else:
+            self.outputs = frame.payload[0]
+            result = APPLIED
+        return [Frame(ACK, frame.sequence, bytes([OUTPUTS, result, FAULT_NONE, self.outputs]))]
 
     def _config_get(self, frame: Frame) -> list[Frame]:
         if not frame.payload:
@@ -191,6 +247,8 @@ class Esp32Device:
         if rates is None:
             return [self._ack(frame, REJECTED, FAULT_NONE)]
         pan, tilt1, tilt2 = rates
+        if self.patrol.active and pan != 0:
+            return [self._ack(frame, REJECTED, FAULT_NONE)]
         if tilt1 != 0 and tilt2 != 0:
             return [self._ack(frame, SAFETY, FAULT_NONE)]
         if tilt1 != 0 and self.active_tilt != 2:
@@ -202,6 +260,8 @@ class Esp32Device:
             refusal = self._accept_rate(axis_id, rate)
             if refusal is not None:
                 return [self._ack(frame, SAFETY, refusal)]
+        if self.patrol.active:
+            del commanded[1]
         for axis_id, rate in commanded.items():
             self.axes[axis_id].commanded_dps = _deadband(self.axes[axis_id], rate)
         self.last_motion = self._clock()
@@ -335,7 +395,7 @@ class Esp32Device:
             fault_code=self.fault_code,
             axes=view.axes,
         )
-        return Frame(STATUS, sequence, body)
+        return Frame(STATUS, sequence, body + bytes([self.outputs]) + patrol.encode_block(self.patrol.view))
 
     def _hello_ack(self, sequence: int) -> Frame:
         payload = self.boot_id.to_bytes(4, "little") + bytes([1 if self.energized else 0, 1])

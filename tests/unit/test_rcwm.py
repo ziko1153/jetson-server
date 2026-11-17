@@ -7,6 +7,7 @@ from pathlib import Path
 import pytest
 
 from app.core.config import RcwmSettings
+from app.rcwm import patrol
 from app.rcwm.device import Esp32Device
 from app.rcwm.models import MotorConfig
 from app.rcwm.protocol import (
@@ -15,7 +16,9 @@ from app.rcwm.protocol import (
     CONFIG_WRITE,
     HOME,
     MOTION,
+    OUTPUTS,
     OWNERSHIP,
+    PATROL,
     REJECTED,
     RELEASE,
     REQUEST,
@@ -255,3 +258,118 @@ def test_a_late_stick_command_is_dropped_and_a_fresh_one_is_forwarded(tmp_path: 
     assert fresh[7] == APPLIED
     assert item._device.motion_frames == 2
 
+
+
+def test_outputs_need_ownership_and_reach_the_controller(tmp_path: Path) -> None:
+    item = service(tmp_path)
+    denied = item.handle(255, 190, encode_header(OUTPUTS, 1, 0, REQUEST) + bytes([0b001]))[0]
+    assert denied[7] == REJECTED
+    item.handle(255, 190, encode_header(OWNERSHIP, 2, 0, REQUEST))
+    reply = item.handle(255, 190, encode_header(OUTPUTS, 3, 0, REQUEST) + bytes([0b101]))[0]
+    assert reply[3] == OUTPUTS and reply[7] == APPLIED and reply[8] == 0b101
+    assert item.snapshot()["outputs"] == {"wpn_1": True, "wpn_2": False, "wpn_3": True}
+    status = item.handle(255, 190, encode_header(STATUS, 4, 0, REQUEST))[0]
+    assert len(status) == 8 + 48 + 4 + 1 + patrol.BLOCK
+    assert status[8 + 48 + 4] == 0b101
+    unknown = item.handle(255, 190, encode_header(OUTPUTS, 5, 0, REQUEST) + bytes([0b1000]))[0]
+    assert unknown[7] == REJECTED
+
+
+def test_stop_keeps_outputs_and_a_lost_owner_switches_them_off(tmp_path: Path) -> None:
+    clock = Clock()
+    item = service(tmp_path, clock)
+    item.handle(255, 190, encode_header(OWNERSHIP, 1, 0, REQUEST))
+    item.handle(255, 190, encode_header(OUTPUTS, 2, 0, REQUEST) + bytes([0b011]))
+    item.handle(255, 190, encode_header(STOP, 3, 0, REQUEST))
+    assert item.snapshot()["outputs"]["wpn_1"] is True
+    clock.now += 2
+    item.maintain()
+    assert item.snapshot()["outputs"] == {"wpn_1": False, "wpn_2": False, "wpn_3": False}
+
+
+def test_release_switches_outputs_off(tmp_path: Path) -> None:
+    item = service(tmp_path)
+    item.handle(255, 190, encode_header(OWNERSHIP, 1, 0, REQUEST))
+    item.handle(255, 190, encode_header(OUTPUTS, 2, 0, REQUEST) + bytes([0b100]))
+    item.handle(255, 190, encode_header(RELEASE, 3, 0, REQUEST))
+    assert item.snapshot()["outputs"]["wpn_3"] is False
+
+
+def test_serial_status_with_outputs_byte_updates_the_mount_view() -> None:
+    from app.rcwm.mount import SerialMount
+
+    device = Esp32Device()
+    mount = SerialMount("", 115200)
+    replies = device.handle(encode_frame(15, 1, bytes([0b010])))
+    assert replies[0].payload == bytes([15, APPLIED, 0, 0b010])
+    status = device.handle(encode_frame(3, 2, b""))[0]
+    assert len(status.payload) == 49 + patrol.BLOCK
+    mount._apply_status(status.payload)
+    assert mount.view().outputs == 0b010
+    assert mount.view().patrol == patrol.PatrolView()
+    mount._apply_status(status.payload[:48])
+    assert mount.view().outputs is None
+    assert mount.view().patrol is None
+
+
+def patrolling_service(tmp_path: Path, clock: Clock) -> RcwmService:
+    item = service(tmp_path, clock)
+    item.handle(255, 190, encode_header(OWNERSHIP, 1, 0, REQUEST))
+    pan = commissioned(max_speed_dps=30, max_accel=20, max_decel=20, min_angle=-90, max_angle=180)
+    assert item.handle(255, 190, write_config(1, 2, pan))[0][7] == APPLIED
+    assert item.handle(255, 190, write_config(2, 3, commissioned()))[0][7] == APPLIED
+    assert item.handle(255, 190, encode_header(HOME, 4, 1, REQUEST))[0][7] == APPLIED
+    assert item.handle(255, 190, encode_header(SELECT, 5, 2, REQUEST))[0][7] == APPLIED
+    return item
+
+
+def patrol_request(request_id: int, payload: bytes) -> bytes:
+    return encode_header(PATROL, request_id, 0, REQUEST) + payload
+
+
+def test_patrol_refuses_a_range_outside_the_pan_limits(tmp_path: Path) -> None:
+    clock = Clock()
+    item = patrolling_service(tmp_path, clock)
+    reply = item.handle(255, 190, patrol_request(10, patrol.start_payload(-100, 40, 20)))[0]
+    assert reply[7] == REJECTED and reply[8] == patrol.REASON_OUTSIDE_LIMITS
+    reply = item.handle(255, 190, patrol_request(11, patrol.start_payload(-20, 40, 31)))[0]
+    assert reply[7] == REJECTED and reply[8] == patrol.REASON_SPEED
+    denied = item.handle(254, 190, patrol_request(1, patrol.start_payload(-20, 40, 20)))[0]
+    assert denied[7] == REJECTED
+
+
+def test_patrol_owns_pan_and_leaves_tilt_to_the_stick(tmp_path: Path) -> None:
+    clock = Clock()
+    item = patrolling_service(tmp_path, clock)
+    reply = item.handle(255, 190, patrol_request(10, patrol.start_payload(-20, 40, 25)))[0]
+    assert reply[7] == APPLIED
+    assert item.handle(255, 190, motion_command(11, 5, 0, 0))[0][7] == REJECTED
+    assert item.handle(255, 190, motion_command(12, 0, 5, 0))[0][7] == APPLIED
+    assert item._device.axes[2].commanded_dps == 5
+    item.handle(255, 190, encode_header(STOP, 13, 0, REQUEST))
+    low = high = 0.0
+    for _ in range(3000):
+        clock.now += 0.02
+        item._device.advance(0.02)
+        angle = item._device.view().axes[1].estimated_deg
+        low, high = min(low, angle), max(high, angle)
+    assert -20 <= low < -19
+    assert 39 < high <= 40
+    assert item.snapshot()["patrol"]["active"] is True
+
+
+def test_patrol_survives_a_lost_owner_and_stops_on_request(tmp_path: Path) -> None:
+    clock = Clock()
+    item = patrolling_service(tmp_path, clock)
+    item.handle(255, 190, patrol_request(10, patrol.start_payload(-20, 40, 25)))
+    clock.now += 2
+    item.maintain()
+    assert item.snapshot()["owner_system_id"] == 0
+    assert item.snapshot()["patrol"]["active"] is True
+    item.handle(254, 190, encode_header(OWNERSHIP, 1, 0, REQUEST))
+    reply = item.handle(254, 190, patrol_request(2, bytes([patrol.ACTION_STOP])))[0]
+    assert reply[7] == APPLIED
+    view = item.snapshot()["patrol"]
+    assert view["active"] is False and view["reason"] == patrol.REASON_OPERATOR
+    status = item.handle(254, 190, encode_header(STATUS, 3, 0, REQUEST))[0]
+    assert patrol.decode_block(status[8 + 48 + 4 + 1:]).reason == patrol.REASON_OPERATOR

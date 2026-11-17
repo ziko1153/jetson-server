@@ -69,3 +69,20 @@ Verified on the Jetson with CAM-001, CAM-002, and CAM-004 live and CAM-003 unplu
 - The mosaic stopped when the gateway was restarted for the ONVIF deploy; nothing restarted it.
 - MosaicManager now writes data/mosaic_run.json on start/stop and restore() relaunches it in a background thread from the lifespan. Tests: tests/unit/test_mosaic_restore.py.
 - GCS: VLC needed --rtsp-frame-buffer-size=2000000; 2.5K keyframes were truncated at 250 KB, causing slow starts.
+
+## 2026-11-06 RCWM water outputs
+
+- New `firmware/esp32/include/outputs.hpp` (`OutputBank`). `main.cpp` only gained the outputs hooks; the planner and stepper code are unchanged. Pins live in `board.hpp`.
+- Outputs are independent of STOP, because the GCS sends STOP on every stick release and tilt change.
+- Fail-safe chain: the Jetson sends outputs off on lease expiry and release; the ESP32 turns them off after 5 s without a valid frame (the Jetson polls every 2 s).
+- The serial STATUS mask byte is parsed in `SerialMount._apply_status`, not in the shared status decoder, because byte 48 of the MAVLink body is the clock.
+- The GCS (separate repository) has the matching protocol, FIRE SAFE arming, and the new RCWM HUD.
+- Verified: `pio run -e esp32dev`, firmware host tests, and Python unit tests on this Mac. No hardware test.
+
+## 2026-11-06 RCWM pan patrol and GCS redesign
+
+- New `firmware/esp32/include/patrol.hpp` (`PanPatrol`). It writes only the pan target through the planner accessor and is serviced before `planner.advance`. Braking uses the half-deceleration profile; the host test stays inside the range (−19.8 to 39.9 for −20 to 40).
+- MOTION with pan ≠ 0 is refused during patrol. A quiet tilt stick is released before the planner timeout so pan keeps sweeping.
+- Jetson: `app/rcwm/patrol.py`, PATROL forwarding in `service.py`, status block parsing in `mount.py`, simulator support in `device.py`. Docs: `RCWM_SERIAL_PROTOCOL.md`, `RCWM_INTEGRATION.md`, `API.md`, `ESP32_FIRMWARE.md`.
+- The GCS (separate repository) gained the patrol dialog, MG/RL fire buttons, crosshair offsets, and per-tilt cameras. Installed on the tablet and checked visually with no controller connected.
+- Verified: `pio run -e esp32dev`, firmware host tests, 88 Python tests. No hardware test.

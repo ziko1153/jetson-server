@@ -6,10 +6,21 @@ import logging
 import threading
 import time
 
+from app.rcwm import patrol
 from app.rcwm.device import Esp32Device
 from app.rcwm.models import MountView
-from app.rcwm.protocol import AXES, FAULT_ESP32_SILENT, AxisView
-from app.rcwm.serial_protocol import HELLO, HELLO_ACK, STATUS, STATUS_REQ, Frame, encode_frame, pop_frames
+from app.rcwm.protocol import AXES, FAULT_ESP32_SILENT, OUTPUT_MASK, STATUS_BODY, AxisView
+from app.rcwm.serial_protocol import (
+    ACK,
+    HELLO,
+    HELLO_ACK,
+    OUTPUTS,
+    STATUS,
+    STATUS_REQ,
+    Frame,
+    encode_frame,
+    pop_frames,
+)
 
 logger = logging.getLogger("app.rcwm")
 
@@ -199,7 +210,14 @@ class SerialMount:
             self._view.energized = bool(frame.payload[4]) if len(frame.payload) > 4 else False
         if frame.msg_type == STATUS:
             self._apply_status(frame.payload)
+        if frame.msg_type == ACK and len(frame.payload) >= 4 and frame.payload[0] == OUTPUTS:
+            self._view.outputs = frame.payload[3] & OUTPUT_MASK
         self._pending.append(frame)
+
+    @staticmethod
+    def _patrol_of(payload: bytes):
+        start = STATUS_BODY + 1
+        return patrol.decode_block(payload[start:start + patrol.BLOCK])
 
     def _apply_status(self, payload: bytes) -> None:
         from app.rcwm.protocol import decode_status_body
@@ -214,6 +232,9 @@ class SerialMount:
             active_tilt=decoded["active_tilt"],
             fault_code=decoded["fault_code"],
             axes=decoded["axes"],
+            # Firmware without outputs sends exactly the 48-byte body.
+            outputs=payload[STATUS_BODY] & OUTPUT_MASK if len(payload) > STATUS_BODY else None,
+            patrol=self._patrol_of(payload),
         )
 
     def _drop(self) -> None:

@@ -37,6 +37,12 @@ POSITIONS = 8
 FAULTS = 9
 OWNERSHIP = 10
 RELEASE = 11
+OUTPUTS = 12
+PATROL = 13
+
+# On/off water outputs WPN-1..WPN-3. Bit n is output n.
+OUTPUT_COUNT = 3
+OUTPUT_MASK = (1 << OUTPUT_COUNT) - 1
 
 REQUEST = 0
 ACCEPTED = 1
