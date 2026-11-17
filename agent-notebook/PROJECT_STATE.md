@@ -17,13 +17,13 @@ Not run on a Jetson, a Matek, a real ESP32, or the Skydroid G30. Rover SITL was 
 
 Default camera records remain `CAM-001` through `CAM-006` at `192.168.144.101`–`106`, RTSP port `554`, path `/`. Simulation playback uses `config/cameras.simulation.json`. Production `config/config.json` leaves the flight-controller transport at `none`.
 
-## RCWM water outputs (2026-11-06, Mac only)
+## RCWM water outputs (2026-11-06, gateway on the Jetson 2026-11-17)
 
-The ESP32 firmware drives three SSR outputs, active high: MG FIRE on GPIO 14 (Tilt 1), RL-1 on GPIO 16 and RL-2 on GPIO 17 (Tilt 2). They are set with serial frame type 15 and MAVLink RC opcode 12, owner only. Outputs are off at boot, when the Jetson lease ends or control is released, and after 5 s with no valid serial frame. STATUS carries the mask after the 48-byte body. The stepper code was not changed. Verified with `pio run -e esp32dev`, the firmware host tests and the Python unit tests. Not flashed and not run on a real ESP32, SSR, or the Jetson.
+The ESP32 firmware drives three SSR outputs, active high: MG FIRE on GPIO 14 (Tilt 1), RL-1 on GPIO 16 and RL-2 on GPIO 17 (Tilt 2). They are set with serial frame type 15 and MAVLink RC opcode 12, owner only. Outputs are off at boot, when the Jetson lease ends or control is released, and after 5 s with no valid serial frame. STATUS carries the mask after the 48-byte body. The stepper code was not changed. Verified with `pio run -e esp32dev`, the firmware host tests and the Python unit tests. The Jetson checkout is at `2105fc6` and `ugv-jetson-gateway` was restarted on 2026-11-17; `GET /api/v1/system/status` now includes `rcwm.outputs`. The firmware has not been flashed and has not been run on a real ESP32 or SSR.
 
-## RCWM pan patrol (2026-11-06, Mac only)
+## RCWM pan patrol (2026-11-06, gateway on the Jetson 2026-11-17)
 
-Pan patrol runs on the ESP32 (`patrol.hpp`, serial type 16) and is requested with MAVLink RC opcode 13, owner only; the Jetson refuses a start with SAFETY while `allow_hardware_motion` is false on a serial transport. The range must sit inside the applied pan limits and the speed at or below the pan maximum, and the firmware rechecks both every loop. Joystick pan is refused while patrolling; tilt still works. Patrol survives link loss, STOP and lease expiry. STATUS carries an 8-byte patrol block after the outputs byte. The simulator implements the same rules. Verified with host tests, `pio run` and the Python tests. Not run on hardware.
+Pan patrol runs on the ESP32 (`patrol.hpp`, serial type 16) and is requested with MAVLink RC opcode 13, owner only; the Jetson refuses a start with SAFETY while `allow_hardware_motion` is false on a serial transport. The range must sit inside the applied pan limits and the speed at or below the pan maximum, and the firmware rechecks both every loop. Joystick pan is refused while patrolling; tilt still works. Patrol survives link loss, STOP and lease expiry. STATUS carries an 8-byte patrol block after the outputs byte. The simulator implements the same rules. Verified with host tests, `pio run` and the Python tests. The running gateway reports `rcwm.patrol`. Not run on the mount.
 
 ## Camera control (2026-11-03, on the Jetson)
 

@@ -22,6 +22,6 @@
 ## From 2026-11-06
 
 - Flash the ESP32 with the output and patrol firmware and check each SSR with a meter. GPIO 14 pulses during boot; confirm the SSR load tolerates it or move MG FIRE. GPIO 16 and 17 are free only on a WROOM module, not WROVER.
-- Pull the updated code onto the Jetson and restart the gateway. Until then the GCS reports that the controller has not sent its fire outputs.
+- The gateway on the Jetson is running this code. Fire outputs and patrol stay unavailable to the ground station until the ESP32 is flashed with it.
 - Check on hardware that fire outputs drop on lease loss, on release, and after the 5 s ESP32 watchdog.
 - Try pan patrol on the real mount with a narrow range first. It needs pan limits, speed, acceleration, deceleration and home set, and `allow_hardware_motion` true.

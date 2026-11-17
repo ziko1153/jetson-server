@@ -86,3 +86,9 @@ Verified on the Jetson with CAM-001, CAM-002, and CAM-004 live and CAM-003 unplu
 - Jetson: `app/rcwm/patrol.py`, PATROL forwarding in `service.py`, status block parsing in `mount.py`, simulator support in `device.py`. Docs: `RCWM_SERIAL_PROTOCOL.md`, `RCWM_INTEGRATION.md`, `API.md`, `ESP32_FIRMWARE.md`.
 - The GCS (separate repository) gained the patrol dialog, MG/RL fire buttons, crosshair offsets, and per-tilt cameras. Installed on the tablet and checked visually with no controller connected.
 - Verified: `pio run -e esp32dev`, firmware host tests, 88 Python tests. No hardware test.
+
+## 2026-11-17 Deploy outputs and patrol to the Jetson
+
+- Committed the Mac RCWM work as `2105fc6` and pushed it to origin. The Jetson USB link has no DNS, so the same commits were fast-forwarded over USB. `config/config.json`, `config/cameras.json`, and `config/mosaic.json` were unchanged.
+- Restarted `ugv-jetson-gateway`. Health returned ok, uptime reset, the media server is running, and the mosaic came back on CAM-004, CAM-003, CAM-002, CAM-001. `rcwm.outputs` and `rcwm.patrol` are in system status.
+- The Jetson clock still reads 2026-11-06. The ESP32 firmware on the vehicle was not flashed.

@@ -25,3 +25,7 @@
 
 - ESP32 SSR outputs MG FIRE / RL-1 / RL-2 (GPIO 14, 16, 17) with a link watchdog, serial type 15, MAVLink RC opcode 12, and the outputs mask in status and `GET /api/v1/system/status`.
 - ESP32 pan patrol (serial type 16, MAVLink RC opcode 13), patrol block in status, `rcwm.patrol` in the system status, simulator support, and tests.
+
+## 2026-11-17
+
+- Commit `2105fc6` is on the Jetson. `ugv-jetson-gateway` was restarted; health is ok, the media server and mosaic are running, and status includes `rcwm.outputs` and `rcwm.patrol`. Per-machine config was left as it was. The ESP32 was not flashed.
